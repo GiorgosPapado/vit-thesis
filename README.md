@@ -1,6 +1,6 @@
 # vit-thesis
 
-Code for my MSc thesis: classifying VR controller gestures with Vision Transformers (ViT), compared against an SVM baseline, plus the image-captioning pipeline (ViT-GPT2 on a spatial COCO dataset) that grew out of the same work.
+Code for my MSc thesis, *Vision Transformer for Gesture Recognition from EMG Signals* (MSc Digital Media & Computational Intelligence, Aristotle University of Thessaloniki): Vision Transformers (fine-tuned and trained from scratch) compared against SVM baselines across gesture-count and participant splits. The repository also holds a separate pipeline for ViT-GPT2 image captioning on a spatial COCO dataset.
 
 > TODO: one sentence on the research question and the headline result.
 
