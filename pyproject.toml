@@ -10,7 +10,8 @@ requires-python = ">=3.9"
 dependencies = ["numpy", "scipy", "scikit-learn", "matplotlib", "pyyaml"]
 
 [project.optional-dependencies]
-torch = ["torch"]
+torch = ["torch", "transformers"]
+tracking = ["mlflow"]
 dev = ["pytest", "ruff"]
 
 [project.scripts]

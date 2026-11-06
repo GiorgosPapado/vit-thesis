@@ -163,10 +163,7 @@ def run_svm(cfg: dict, out_dir="runs") -> Path:
     return run_dir
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="emg-gesture", description=__doc__)
-    sub = parser.add_subparsers(dest="command", required=True)
-    p = sub.add_parser("svm", help="train/evaluate the SVM baseline")
+def _add_common_options(p) -> None:
     p.add_argument("--task", required=True, choices=TASKS)
     p.add_argument("--split", choices=("grouped", "random"), default=None, help="default: from config")
     p.add_argument("--seed", type=int, default=None, help="default: from config")
@@ -174,13 +171,22 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--out-dir", default="runs")
     p.add_argument("--set", dest="overrides", action="append", default=[], metavar="KEY=VALUE",
                    help="override a config value (dotted keys ok, e.g. svm.kernel=rbf); repeatable")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="emg-gesture", description=__doc__)
+    sub = parser.add_subparsers(dest="command", required=True)
+    for name, helptext in (("svm", "train/evaluate the SVM baseline"),
+                           ("vit-google", "fine-tune the pretrained Google ViT"),
+                           ("vit-scratch", "train a small ViT from scratch")):
+        _add_common_options(sub.add_parser(name, help=helptext))
     return parser
 
 
 def main(argv=None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     args = build_parser().parse_args(argv)
-    cfg = load_config(args.config_dir, args.command, args.task, args.overrides)
+    cfg = load_config(args.config_dir, args.command.replace("-", "_"), args.task, args.overrides)
     if args.seed is not None:
         cfg["seed"] = args.seed
     if args.split is not None:
@@ -188,7 +194,12 @@ def main(argv=None) -> int:
     if cfg.get("data_dir") is None:
         raise SystemExit("data_dir is not set (task config or --set data_dir=...)")
     cfg["data_dir"] = os.fspath(cfg["data_dir"])
-    run_svm(cfg, args.out_dir)
+    if args.command == "svm":
+        run_svm(cfg, args.out_dir)
+    else:
+        from .train_vit import run_vit
+
+        run_vit(cfg, args.command.split("-", 1)[1], args.out_dir)
     return 0
 
 

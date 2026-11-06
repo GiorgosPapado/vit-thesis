@@ -1,0 +1,23 @@
+# Fine-tune google/vit-base-patch16-224-in21k (vit_google_10gest.ipynb). Merge: base < this < task.
+test_size: 0.2
+val_size: 0.2        # fraction of train+val held out for checkpoint selection
+device: auto         # auto | cpu | cuda (falls back to cpu if cuda is unavailable)
+model:
+  pretrained: true   # false builds a randomly initialised ViTConfig from the keys below (tests/smoke runs)
+  name: google/vit-base-patch16-224-in21k
+  image_size: 224
+train:
+  epochs: 50
+  batch_size: 32
+  lr: 1.0e-4
+  weight_decay: 0.01 # torch.optim.AdamW default, which the notebook relied on
+  eps: 1.0e-8
+  grad_clip: null
+  num_workers: 0
+  scheduler: null
+augment:
+  enabled: false
+tracking:
+  enabled: false
+  uri: null          # or env MLFLOW_TRACKING_URI; relative path / sqlite: / http(s) only
+  experiment: null
