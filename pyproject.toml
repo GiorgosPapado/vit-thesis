@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "emg-gesture"
+version = "0.1.0"
+description = "EMG gesture classification utilities (data loading, splits, evaluation) for the ViT thesis"
+requires-python = ">=3.9"
+dependencies = ["numpy", "scipy", "scikit-learn", "matplotlib"]
+
+[project.optional-dependencies]
+torch = ["torch"]
+dev = ["pytest", "ruff"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "tests"]
+
+[tool.ruff]
+line-length = 120
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
