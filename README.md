@@ -2,7 +2,7 @@
 
 Code for my MSc thesis, *Vision Transformer for Gesture Recognition from EMG Signals* (MSc Digital Media & Computational Intelligence, Aristotle University of Thessaloniki): Vision Transformers (fine-tuned from a Google checkpoint, and trained from scratch) compared against SVM baselines across gesture-count and participant splits. The repository also holds a separate, independent pipeline for ViT-GPT2 image captioning on a spatial COCO dataset.
 
-> TODO: one sentence on the research question and the headline result (author only).
+**Research question and headline claim (from the thesis):** a comparative study of attention (Vision Transformer) against a traditional ML baseline (PCA + SVM) on two tasks, gesture recognition (HGR) and user identification (the thesis calls the latter "biometric authentication", but it is multi-class identification). The thesis reports superior performance of the ViT. It states no formal hypotheses. Numbers are summarised under [Results](#results) and were **not** reproduced by this repository.
 
 **Status:** the package reimplements the original notebooks. Nothing has been re-run end to end on the real data since the refactor, so there are no verified results in this README (see [Results](#results) and [Known limitations](#known-limitations)).
 
@@ -47,7 +47,7 @@ Tasks (`--task`), with configs in `configs/task/`:
 
 | Task | Label | n_classes | Split behaviour |
 |---|---|---|---|
-| `10gest` | gesture | 10 | grouped by participant by default; `--split random` allowed |
+| `10gest` | gesture | 10 | grouped by participant by default; `--split random` / `--split session` allowed |
 | `5gest` | gesture | 5 | grouped by participant by default; `--split random` allowed (SVM kernel rbf) |
 | `17participants` | participant | 17 | forced to `random` (logged) |
 | `10part` | participant | 10 | forced to `random` (logged) |
@@ -74,11 +74,23 @@ Participant-label tasks cannot be split by participant, hence the forced random 
    emg-gesture vit-scratch --task T --seeds 1,2,3 --set data_dir=DATA/<task folder>
    ```
 
-   Other options: `--split grouped|random`, `--seed N` (single run; not combined with `--seeds`), `--config-dir`, `--out-dir` (default `runs`), repeatable `--set KEY=VALUE` (dotted keys, e.g. `svm.kernel=rbf`).
+   Other options: `--split grouped|random|session`, `--seed N` (single run; not combined with `--seeds`), `--config-dir`, `--out-dir` (default `runs`), repeatable `--set KEY=VALUE` (dotted keys, e.g. `svm.kernel=rbf`).
 
 3. Optional: `03_experiments/mlflow_plotting.ipynb` for plots from tracked runs.
 
 The captioning commands are independent (`captioning --help`) and take `--data-dir` (or `DATA_DIR`) and `--output-dir` (or `OUTPUT_DIR`).
+
+## Cross-session split (closest to the thesis protocol)
+
+The thesis split is cross-session: sessions 1 and 2 train, session 3 tests, the same split for SVM and ViT. Reproduce that split with:
+
+```bash
+emg-gesture svm --task 10gest --split session --set data_dir=DATA/<task folder>
+```
+
+File names need a `session<k>` token (e.g. `session1_participant7_gesture10_trial1.mat`); a file without one raises an error. Config keys `train_sessions` (default `[1, 2]`) and `test_sessions` (default `[3]`) select the sessions; files from other sessions are excluded, and the script asserts that no file is in two splits. `test_size` is ignored. The thesis described no validation set, so for the ViT a validation set is carved out of the TRAIN sessions as a random per-file fraction (`val_size`, stratified when possible, not participant-disjoint); the SVM uses none. `metrics.json` records `split_mode`, `train_sessions` and `test_sessions` (null for the other modes). Participant-label tasks are not forced to random in this mode.
+
+This is the closest match to the thesis protocol but still **not a verified reproduction**: the thesis input pipeline (scalograms, PCA input shape) is not fully specified, and the repo's preprocessing differs (see limitations).
 
 ## Outputs per run
 
@@ -100,22 +112,69 @@ With `--seeds`, an extra `aggregate.json` (mean and sample std of test accuracy 
 
 ## Results
 
-TODO: no results are claimed here. Fill in only after re-running everything with the current code.
+**Reported in the thesis (cross-session protocol), not reproduced by this repository.** Metric: accuracy only, single run, no seeds, sessions 1+2 train / session 3 test (same split for SVM and ViT); no separate validation set is described. The notebooks here use random per-file splits (and the `emg_gesture` package defaults to a participant-grouped split), so this repository does NOT reproduce the thesis protocol and its numbers will differ. "Pre-trained" = `vit_google`, "scratch" = `vit_train_from_scratch`.
 
-| Model | Task | Split | Seeds | Test accuracy (mean +- std) | Macro-F1 |
-|---|---|---|---|---|---|
-| SVM | TODO | TODO | TODO | TODO | TODO |
-| ViT (Google, fine-tuned) | TODO | TODO | TODO | TODO | TODO |
-| ViT (scratch) | TODO | TODO | TODO | TODO | TODO |
+Table 5.2, user identification (notebooks `5part`, `10part`):
+
+| Participants (samples) | SVM | ViT pre-trained | ViT scratch |
+|---|---|---|---|
+| 5 (1785) | 0.4761 | 0.7619 | 0.6078 |
+| 10 (3570) | 0.2619 | 0.6171 | 0.4165 |
+
+Table 5.3, gesture recognition, 43 participants (notebooks `5gest`, `10gest`):
+
+| Gestures (samples) | SVM | ViT pre-trained | ViT scratch |
+|---|---|---|---|
+| 5 (4515) | 0.6223 | 0.8315 | 0.7583 |
+| 10 (9030) | 0.4672 | 0.6900 | 0.6039 |
+
+Table 5.4, same sample size (3570 samples, 10 classes):
+
+| Task | SVM | ViT pre-trained | ViT scratch |
+|---|---|---|---|
+| Identification, 10 participants (`10part`) | 0.2619 | 0.6171 | 0.4165 |
+| Gesture recognition, 17 participants x 10 gestures (`17participants`) | 0.4039 | 0.6269 | 0.5287 |
+
+Table 5.1, average EER: 0.033 (GRABMyo paper) vs 0.041 (thesis reproduction on the 9030-sample HGR partition).
+
+**Thesis conclusions:** the ViT beat the SVM in all tasks; the pre-trained ViT plateaus after about a dozen epochs and is prone to overfitting; the scratch ViT scales better with more data; identification is harder than gesture recognition and both models fail to generalise well there.
+
+**Thesis limitations / future work:** small subsets, high dimensionality, memory cost; future work lists FFT/wavelet preprocessing, data augmentation, and inference time / real-time use.
+
+Results of this repository's own code: none yet. TODO: re-run with the current code and report mean +- std over seeds here.
+
+## Method and setup (as described in the thesis)
+
+- SVM: PCA(100) + SVC, rbf kernel, GridSearchCV over C in {0.1, 1, 10, 100} and gamma in {scale, auto, 0.01, 0.001, 0.0001}; best C=1, gamma=scale.
+- ViT pre-trained: Google ViT checkpoint (variant not named in the thesis), 50 epochs.
+- ViT from scratch: hidden size 128, 4 heads, 4 layers, 224x224 input, reduced patch count, higher dropout, 500 epochs.
+- Training: AdamW, cross-entropy, 5 warm-up epochs, learning rate 1e-4, batch size 32.
+- Input to the ViT: the EMG rendered as a 224x224 image by averaging channel amplitudes; the exact transform is not described (unclear).
+- Software and hardware: PyTorch + MLflow, Python 3.10.12, Ubuntu 22.04; Intel i9-10900X, 2x RTX 3090, 64 GB RAM.
 
 ## Data
 
-TODO: where the data lives (not committed), how to obtain it, consent/licensing note (author only).
+Dataset: GRABMyo, Pradhan, Jiang, He, "Gesture Recognition and Biometrics ElectroMyogram (GRABMyo) Dataset", IEEE Dataport, 2022. It is not committed to this repository.
+
+- 43 participants, 3 sessions; 32 channels (16 forearm + 12 wrist, the other 4 unused), 2048 Hz.
+- 17 classes: 16 dynamic gestures + rest; 7 repetitions per gesture per session.
+- Each sample is 5 s = 10240 samples x 32 channels; 15351 samples in total.
+- Inconsistency in the source: the thesis text also says "20 male and 20 female", which does not sum to 43.
+
+TODO(author): dataset licence/terms (not stated in the thesis) and how to obtain the data.
 
 ## Citation
 
 ```
-TODO: thesis reference
+Papadopoulos, G. (2024). Vision Transformer for Gesture Recognition from EMG Signals.
+MSc thesis, Aristotle University of Thessaloniki, School of Informatics,
+MSc Digital Media - Computational Intelligence.
+
+Pradhan, A., Jiang, N., He, J. (2022). Gesture Recognition and Biometrics ElectroMyogram
+(GRABMyo) Dataset. IEEE Dataport.
+
+Dosovitskiy, A., et al. (2020). An Image is Worth 16x16 Words: Transformers for Image
+Recognition at Scale. arXiv:2010.11929.
 ```
 
 ## License
@@ -153,3 +212,4 @@ Still open:
 - Determinism: `deterministic: true` (config) turns on `torch.use_deterministic_algorithms(True, warn_only=True)` and `CUBLAS_WORKSPACE_CONFIG`. This is best effort only: ops without deterministic kernels just warn, and results can still differ across hardware, torch versions and worker counts.
 - The legacy scratch cells that follow the main pipeline in `vit_train_from_scratch_5gest`, `_5part` and `_10part` were not updated (marked in a markdown cell); `folders_creation`, `code_reproduction_max_samples`, `pca_components_search` and `mlflow_plotting` were not touched.
 - The `vit_google` notebooks still pass already standardised inputs through the Hugging Face feature extractor, which applies its own fixed normalisation on top.
+- Protocol difference: the thesis used a cross-session split (sessions 1+2 train, session 3 test; single run, accuracy only). The notebooks use random per-file splits and the package defaults to participant-grouped, so neither reproduces the thesis numbers; `--split session` is the closest match (see [Cross-session split](#cross-session-split-closest-to-the-thesis-protocol)).
