@@ -60,3 +60,14 @@ TODO: thesis reference
 ## License
 
 MIT, see [LICENSE](LICENSE).
+
+## Known limitations
+
+These points come from a code review of the notebooks; they are not experimental results.
+
+- The `*part*` notebooks use participant ID as the label, so they perform participant identification, not gesture recognition.
+- The `*gest*` notebooks split randomly by file without grouping by participant or session, so reported numbers are within-subject and do not measure generalisation to new users.
+- The `vit_google` notebooks use the test set as the validation set every epoch.
+- No random seeds are set and results come from single runs.
+- Only accuracy is reported.
+- `svm_10part` computes PCA features but fits on the raw features, and the PCA is fit before cross-validation.
