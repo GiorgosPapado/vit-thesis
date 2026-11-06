@@ -50,7 +50,9 @@ def test_smoke_both_modes(mode, mat_dir, tmp_path):
     metrics = json.loads((run / "metrics.json").read_text())
     assert metrics["epochs"] == 3 and 0 <= metrics["test_accuracy"] <= 1
     val = [float(r["val_acc"]) for r in rows]
-    assert metrics["best_epoch"] == 1 + val.index(max(val))  # first strictly best val epoch
+    assert 1 <= metrics["best_epoch"] <= 3 and rows[metrics["best_epoch"] - 1]["val_acc"] == str(max(val))
+    assert metrics["macro_f1"] is not None and metrics["split_mode"] == "grouped"
+    assert set(metrics["class_counts"]) == {"train", "val", "test"}
     assert metrics["split"] == "grouped"
     assert yaml.safe_load((run / "config.resolved.yaml").read_text())["seed"] == 3
 
@@ -85,7 +87,8 @@ def test_test_eval_once_after_training_with_val_selected_checkpoint(mat_dir, tmp
     metrics = json.loads((run / "metrics.json").read_text())
     assert events[1][1] == metrics["n_test"]
     history, best_epoch = events[0][1]
-    assert best_epoch == max(range(len(history)), key=lambda i: (history[i]["val_acc"], -i)) + 1
+    assert best_epoch == max(range(len(history)),
+                             key=lambda i: (history[i]["val_acc"], -history[i]["val_loss"], -i)) + 1
     assert metrics["best_val_accuracy"] == history[best_epoch - 1]["val_acc"]
 
 
@@ -112,3 +115,82 @@ def test_warmup_cosine_matches_notebook_formula():
 def test_build_vit_rejects_bad_mode():
     with pytest.raises(ValueError):
         train_vit.build_vit("nope", 3)
+
+
+def test_warmup_cosine_clamped_past_max_steps():
+    f = train_vit.warmup_cosine_lambda(5, 500)
+    assert f(499) > 0.0 and f(500) == 0.0 and f(5000) == 0.0  # floor after the schedule ends
+    g = train_vit.warmup_cosine_lambda(5, 500, eta_min=1e-6, base_lr=1e-4)
+    assert g(500) == pytest.approx(0.01) and g(10**6) == pytest.approx(0.01)
+    assert g(255) == pytest.approx(0.01 + 0.99 * 0.5 * (1 + np.cos(250 * np.pi / 495)))  # inside: unchanged
+
+
+def test_warmup_cosine_warmup_not_below_max_no_zero_division():
+    for warmup, mx in ((10, 10), (20, 10), (0, 10)):
+        f = train_vit.warmup_cosine_lambda(warmup, mx)
+        vals = [f(s) for s in range(0, 30)]
+        assert all(0.0 <= v <= 1.0 for v in vals) and vals[-1] == 0.0
+
+
+def test_is_better_tie_breaks_on_lower_val_loss():
+    assert train_vit.is_better(0.5, 1.0, 0.4, 0.1)
+    assert not train_vit.is_better(0.4, 0.1, 0.5, 1.0)
+    assert train_vit.is_better(0.5, 0.8, 0.5, 0.9)  # tie on accuracy, lower loss wins
+    assert not train_vit.is_better(0.5, 0.9, 0.5, 0.8)
+    assert not train_vit.is_better(0.5, 0.9, 0.5, 0.9)  # full tie keeps the earlier epoch
+
+
+def test_fit_keeps_lower_loss_epoch_on_accuracy_tie(monkeypatch):
+    import torch
+
+    model = train_vit.build_vit("scratch", 3, TINY_MODEL)
+    x = torch.randn(4, 3, 32, 32)
+    y = torch.tensor([0, 1, 2, 0])
+    saved = []
+    monkeypatch.setattr(torch, "save", lambda sd, path: saved.append(path))
+    losses = iter([2.0, 1.0, 1.5])
+    monkeypatch.setattr(train_vit, "_batch_stats", lambda logits, t, loss: (next(losses) if not loss.requires_grad
+                                                                              else 0.0, 2, 4))
+    with tempfile.TemporaryDirectory() as d:
+        _, best = train_vit.fit(model, [(x, y)], [(x, y)], {"epochs": 3, "lr": 1e-3}, torch.device("cpu"),
+                                lambda t: t, Path(d) / "b.pth")
+    assert best == 2  # equal val accuracy every epoch; epoch 2 has the lowest val loss
+
+
+def test_run_vit_channel_stats_uses_train_files_only_and_split_is_participant_disjoint(mat_dir, tmp_path,
+                                                                                       monkeypatch):
+    from emg_gesture.data import extract_group_from_filename
+
+    seen = {}
+    real_stats, real_split = train_vit.channel_stats, train_vit.split_files_info
+
+    def stats(files, *a, **k):
+        seen["stats"] = list(files)
+        return real_stats(files, *a, **k)
+
+    def split(files, *a, **k):
+        out = real_split(files, *a, **k)
+        seen["files"], seen["idx"] = list(files), out[:3]
+        return out
+
+    monkeypatch.setattr(train_vit, "channel_stats", stats)
+    monkeypatch.setattr(train_vit, "split_files_info", split)
+    _run("scratch", "10gest", mat_dir, tmp_path / "runs", "train.epochs=1")
+    tr, va, te = ([seen["files"][i] for i in idx] for idx in seen["idx"])
+    assert seen["stats"] == tr
+    assert not set(seen["stats"]) & (set(va) | set(te))
+    groups = [{extract_group_from_filename(p) for p in part} for part in (tr, va, te)]
+    assert all(groups)
+    assert not (groups[0] & groups[1]) and not (groups[0] & groups[2]) and not (groups[1] & groups[2])
+
+
+def test_vit_scratch_seeds_aggregate(mat_dir, tmp_path):
+    out = tmp_path / "runs"
+    argv = ["vit-scratch", "--task", "10gest", "--config-dir", str(CONFIGS), "--out-dir", str(out),
+            "--seeds", "1,2", "--set", f"data_dir={mat_dir}"]
+    for item in (*TINY, "train.epochs=1"):
+        argv += ["--set", item]
+    assert main(argv) == 0
+    (agg,) = [p for p in out.iterdir() if "aggregate" in p.name]
+    data = json.loads((agg / "aggregate.json").read_text())
+    assert data["seeds"] == [1, 2] and len(data["per_seed"]) == 2 and "macro_f1" in data

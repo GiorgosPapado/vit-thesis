@@ -14,11 +14,14 @@ Two layouts coexist: the notebooks use one flat folder of ``*.mat`` per task (e.
 from __future__ import annotations
 
 import glob
+import logging
 import os
 
 import numpy as np
 import scipy.io as sio
 from sklearn.model_selection import GroupShuffleSplit, train_test_split
+
+log = logging.getLogger("emg_gesture")
 
 MAT_KEY = "data_emg"
 VIT_IMAGE_SHAPE = (3, 224, 224)
@@ -110,30 +113,66 @@ def remap_labels(labels, classes=None):
     return idx.astype(np.int64), classes
 
 
-def split_files(files, labels=None, mode: str = "grouped", test_size: float = 0.2,
-                val_size: float = 0.2, seed: int = 42):
-    """Split into (train, val, test) index arrays into ``files``.
+def _stratified_random(idx, labels, test_size, val_size, seed):
+    trainval, test = train_test_split(idx, test_size=test_size, random_state=seed, stratify=labels[idx])
+    if val_size > 0:
+        train, val = train_test_split(trainval, test_size=val_size, random_state=seed,
+                                      stratify=labels[trainval])
+    else:
+        train, val = trainval, idx[:0]
+    return train, val, test
 
-    mode 'random': per-file train_test_split. mode 'grouped': GroupShuffleSplit on the
-    participant id, so splits are participant-disjoint. Validation is carved out of the
-    train portion (``val_size`` is a fraction of train+val). ``val_size=0`` gives an
-    empty validation set.
+
+def split_files_info(files, labels=None, mode: str = "grouped", test_size: float = 0.2,
+                     val_size: float = 0.2, seed: int = 42, stratify=None):
+    """Split into (train, val, test) index arrays plus an info dict.
+
+    mode 'random': per-file train_test_split, stratified by label unless ``stratify`` is False
+    (None/True = try; falls back to unstratified with a warning when a class has < 2 members, no labels
+    are given, or sklearn cannot stratify the requested sizes). mode 'grouped': GroupShuffleSplit on the
+    participant id, so splits are participant-disjoint; a warning is logged when a class is absent from a
+    non-empty split. Validation is carved out of the train portion (``val_size`` is a fraction of
+    train+val); ``val_size=0`` gives an empty validation set.
+
+    ``info`` has ``mode``, ``stratified`` (bool), ``stratify_fallback_reason`` (str or None) and, in grouped
+    mode, ``missing_classes`` ({'train'|'val'|'test': [labels absent from that non-empty split]}).
     """
     files = list(files)
     idx = np.arange(len(files))
+    y = None if labels is None else np.asarray(labels)
+    info = {"mode": mode, "stratified": False, "stratify_fallback_reason": None, "missing_classes": {}}
     if mode == "random":
-        trainval, test = train_test_split(idx, test_size=test_size, random_state=seed)
-        if val_size > 0:
-            train, val = train_test_split(trainval, test_size=val_size, random_state=seed)
-        else:
-            train, val = trainval, idx[:0]
-        return train, val, test
+        out = None
+        if stratify is not False:
+            reason = None
+            if y is None:
+                reason = "no labels given"
+            else:
+                _, counts = np.unique(y, return_counts=True)
+                if counts.min() < 2:
+                    reason = "a class has fewer than 2 members"
+            if reason is None:
+                try:
+                    out = _stratified_random(idx, y, test_size, val_size, seed)
+                    info["stratified"] = True
+                except ValueError as exc:
+                    reason = f"sklearn could not stratify ({exc})"
+            if out is None:
+                info["stratify_fallback_reason"] = reason
+                log.warning("Stratified random split not possible (%s); using an unstratified split.", reason)
+        if out is None:
+            trainval, test = train_test_split(idx, test_size=test_size, random_state=seed)
+            if val_size > 0:
+                train, val = train_test_split(trainval, test_size=val_size, random_state=seed)
+            else:
+                train, val = trainval, idx[:0]
+            out = (train, val, test)
+        return (*out, info)
     if mode != "grouped":
         raise ValueError("mode must be 'grouped' or 'random'")
     groups = np.array([extract_group_from_filename(f) for f in files], dtype=object)
     if any(g is None for g in groups):
         raise ValueError("could not parse a participant id from every filename")
-    y = None if labels is None else np.asarray(labels)
     trainval, test = next(GroupShuffleSplit(1, test_size=test_size, random_state=seed).split(idx, y, groups))
     if val_size > 0:
         rel_tr, rel_va = next(GroupShuffleSplit(1, test_size=val_size, random_state=seed).split(
@@ -144,7 +183,40 @@ def split_files(files, labels=None, mode: str = "grouped", test_size: float = 0.
     gt, gv, ge = (set(groups[i]) for i in (train, val, test))
     if (gt & gv) or (gt & ge) or (gv & ge):
         raise AssertionError("participant leakage between splits")
-    return train, val, test
+    if y is not None:
+        allc = set(np.unique(y).tolist())
+        for name, sub in (("train", train), ("val", val), ("test", test)):
+            if len(sub) == 0:
+                continue
+            missing = sorted(allc - set(y[sub].tolist()))
+            if missing:
+                info["missing_classes"][name] = [int(m) for m in missing]
+                log.warning("Grouped split: class(es) %s absent from the %s split (few participants); "
+                            "metrics on it are not comparable across classes.", missing, name)
+    return train, val, test, info
+
+
+def split_files(files, labels=None, mode: str = "grouped", test_size: float = 0.2,
+                val_size: float = 0.2, seed: int = 42, stratify=None):
+    """:func:`split_files_info` without the info dict: returns (train, val, test) index arrays."""
+    return split_files_info(files, labels, mode, test_size, val_size, seed, stratify)[:3]
+
+
+def split_report(labels, train, val, test, info: dict) -> dict:
+    """Metrics fields describing a split: mode, stratification, missing classes, per-split class counts."""
+    labels = np.asarray(labels)
+
+    def counts(sub):
+        u, c = np.unique(labels[sub], return_counts=True)
+        return {str(int(k)): int(v) for k, v in zip(u, c)}
+
+    return {
+        "split_mode": info["mode"],
+        "split_stratified": bool(info["stratified"]),
+        "split_stratify_fallback_reason": info["stratify_fallback_reason"],
+        "split_missing_classes": info["missing_classes"],
+        "class_counts": {"train": counts(train), "val": counts(val), "test": counts(test)},
+    }
 
 
 class EMGDataset:

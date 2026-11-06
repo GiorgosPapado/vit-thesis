@@ -3,5 +3,7 @@ seed: 42
 split: grouped        # grouped (participant-disjoint) | random (per-file); *part tasks force random
 test_size: 0.33
 cv_splits: 3
+stratify: true       # random split only: stratify by label when every class has >= 2 members, else fall back (warning)
+deterministic: false # opt-in torch deterministic algorithms (best effort, may be slower); see README
 target_length: 10240
 data_dir: null        # set per task (relative to the working directory) or via --set data_dir=...

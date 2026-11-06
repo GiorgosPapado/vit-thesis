@@ -92,3 +92,35 @@ def test_parity_with_svm_10gest_notebook(mat_dir, tmp_path):
     assert metrics["test_accuracy"] == pytest.approx(nb_acc)
     assert metrics["cv_scores"] == pytest.approx(list(nb_cv))
     assert metrics["n_test"] == len(ns["y_test"])
+
+
+def test_metrics_record_split_details(mat_dir, tmp_path):
+    m = json.loads((_run("5part", mat_dir, tmp_path / "a", "--split", "grouped") / "metrics.json").read_text())
+    assert m["split_mode"] == "random" and m["split_stratified"] is True
+    assert "participant" in m["split_forced_reason"]
+    assert set(m["class_counts"]) == {"train", "val", "test"} and 0 <= m["macro_f1"] <= 1
+    g = json.loads((_run("10gest", mat_dir, tmp_path / "b") / "metrics.json").read_text())
+    assert g["split_mode"] == "grouped" and g["split_forced_reason"] is None
+    assert sum(g["class_counts"]["test"].values()) == g["n_test"]
+
+
+def test_svm_seeds_writes_aggregate(mat_dir, tmp_path):
+    out = tmp_path / "runs"
+    argv = ["svm", "--task", "10gest", "--config-dir", str(CONFIGS), "--out-dir", str(out),
+            "--set", f"data_dir={mat_dir}", *FAST, "--seeds", "1,2,3"]
+    assert main(argv) == 0
+    runs = [p for p in out.iterdir() if p.name.startswith("10gest_svm_")]
+    assert len(runs) == 3
+    (agg,) = [p for p in out.iterdir() if "aggregate" in p.name]
+    data = json.loads((agg / "aggregate.json").read_text())
+    accs = [json.loads((r / "metrics.json").read_text())["test_accuracy"] for r in runs]
+    assert data["seeds"] == [1, 2, 3] and data["n_runs"] == 3
+    assert data["test_accuracy"]["mean"] == pytest.approx(np.mean(accs))
+    assert data["test_accuracy"]["std"] == pytest.approx(np.std(accs, ddof=1))
+    assert "macro_f1" in data and len(data["per_seed"]) == 3
+
+
+def test_seed_and_seeds_conflict(mat_dir, tmp_path):
+    with pytest.raises(SystemExit):
+        main(["svm", "--task", "10gest", "--config-dir", str(CONFIGS), "--set", f"data_dir={mat_dir}",
+              "--seed", "1", "--seeds", "1,2"])

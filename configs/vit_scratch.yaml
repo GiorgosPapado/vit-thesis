@@ -18,8 +18,10 @@ train:
   eps: 1.0e-6        # transformers.AdamW default used by the notebook
   grad_clip: 1.0
   num_workers: 0
-  # Notebook calls scheduler.step() once per BATCH but counts warmup_epochs/max_epochs as if per epoch;
-  # kept as-is (units are optimiser steps). Set scheduler: null to disable.
+  # The notebooks called scheduler.step() once per BATCH but counted warmup_epochs/max_epochs as if per epoch,
+  # i.e. epochs were treated as optimiser steps. Kept as-is inside max_epochs (units are optimiser steps);
+  # beyond max_epochs steps the step is CLAMPED and the LR stays at eta_min. With many batches per epoch the
+  # schedule therefore ends early (e.g. 500 steps = a few epochs). Set scheduler: null to disable.
   scheduler:
     name: warmup_cosine
     warmup_epochs: 5

@@ -19,7 +19,8 @@ from .data import (
     extract_label_from_filename,
     list_mat_files,
     load_flattened,
-    split_files,
+    split_files_info,
+    split_report,
 )
 from .evaluate import report_eval
 from .models import svm_pipeline
@@ -80,6 +81,41 @@ def _unique_run_dir(out_dir, task, method, seed) -> Path:
     return path
 
 
+def resolve_split(cfg: dict, task: str):
+    """Validate label/split; force 'random' for participant labels. Mutates ``cfg``, returns the reason or None."""
+    label_kind = cfg["label"]
+    if label_kind not in ("gesture", "participant"):
+        raise ValueError("label must be 'gesture' or 'participant'")
+    reason = None
+    if label_kind == "participant" and cfg["split"] != "random":
+        reason = "participant label: a participant-grouped split would remove every class from training"
+        log.warning("Task %s uses participant as the label: split forced to 'random' (was %r).", task, cfg["split"])
+        cfg["split"] = "random"
+    if cfg["split"] not in ("grouped", "random"):
+        raise ValueError("split must be 'grouped' or 'random'")
+    return reason
+
+
+def aggregate_runs(run_dirs, out_dir, task, method, seeds) -> Path:
+    """Write ``aggregate.json`` (mean/std of test accuracy and macro-F1 over per-seed runs) to a new dir."""
+    per_seed = []
+    for seed, rd in zip(seeds, run_dirs):
+        m = json.loads((Path(rd) / "metrics.json").read_text(encoding="utf8"))
+        per_seed.append({"seed": seed, "run_dir": Path(rd).name, "test_accuracy": m["test_accuracy"],
+                         "macro_f1": m["macro_f1"]})
+    agg = {"task": task, "method": method, "seeds": list(seeds), "n_runs": len(per_seed), "per_seed": per_seed,
+           "std_ddof": 1 if len(per_seed) > 1 else 0}
+    for key in ("test_accuracy", "macro_f1"):
+        v = np.array([r[key] for r in per_seed], dtype=float)
+        agg[key] = {"mean": float(v.mean()), "std": float(v.std(ddof=1)) if len(v) > 1 else 0.0}
+    path = _unique_run_dir(out_dir, task, f"{method}-aggregate", "seeds")
+    with open(path / "aggregate.json", "w", encoding="utf8") as f:
+        json.dump(agg, f, indent=2)
+    log.info("aggregate over seeds %s: accuracy %.4f +- %.4f", list(seeds), agg["test_accuracy"]["mean"],
+             agg["test_accuracy"]["std"])
+    return path
+
+
 def run_svm(cfg: dict, out_dir="runs") -> Path:
     """Run the SVM baseline for a resolved config and write the run directory."""
     import matplotlib
@@ -90,16 +126,9 @@ def run_svm(cfg: dict, out_dir="runs") -> Path:
 
     cfg = copy.deepcopy(cfg)
     seed = int(cfg["seed"])
-    set_seed(seed)
+    set_seed(seed, bool(cfg.get("deterministic", False)))
     task, label_kind = cfg["task"], cfg["label"]
-    if label_kind not in ("gesture", "participant"):
-        raise ValueError("label must be 'gesture' or 'participant'")
-    if label_kind == "participant" and cfg["split"] != "random":
-        log.warning("Task %s uses participant as the label: a participant-grouped split would remove every "
-                    "class from the training set, so the split is forced to 'random' (was %r).", task, cfg["split"])
-        cfg["split"] = "random"
-    if cfg["split"] not in ("grouped", "random"):
-        raise ValueError("split must be 'grouped' or 'random'")
+    forced_reason = resolve_split(cfg, task)
 
     files = list_mat_files(cfg["data_dir"])
     if not files:
@@ -114,8 +143,9 @@ def run_svm(cfg: dict, out_dir="runs") -> Path:
         log.warning("config n_classes=%s but %d distinct labels found in %s", cfg["n_classes"], n_found,
                     cfg["data_dir"])
 
-    train_idx, _, test_idx = split_files(files, labels, mode=cfg["split"], test_size=cfg["test_size"],
-                                         val_size=0.0, seed=seed)
+    train_idx, val_idx, test_idx, split_info = split_files_info(
+        files, labels, mode=cfg["split"], test_size=cfg["test_size"], val_size=0.0, seed=seed,
+        stratify=cfg.get("stratify", True))
     X_train = np.array([load_flattened(files[i], cfg["target_length"]) for i in train_idx])
     X_test = np.array([load_flattened(files[i], cfg["target_length"]) for i in test_idx])
     y_train, y_test = labels[train_idx], labels[test_idx]
@@ -140,11 +170,14 @@ def run_svm(cfg: dict, out_dir="runs") -> Path:
     metrics = {
         "task": task,
         "split": cfg["split"],
+        "split_forced_reason": forced_reason,
+        **split_report(labels, train_idx, val_idx, test_idx, split_info),
         "seed": seed,
         "n_train": int(len(train_idx)),
         "n_test": int(len(test_idx)),
         "n_classes_seen": int(len(classes)),
         "test_accuracy": res["accuracy"],
+        "macro_f1": res["macro_f1"],
         "chance_uniform": res["chance_uniform"],
         "chance_majority": res["chance_majority"],
         "cv_scores": [float(s) for s in cv_scores],
@@ -167,6 +200,8 @@ def _add_common_options(p) -> None:
     p.add_argument("--task", required=True, choices=TASKS)
     p.add_argument("--split", choices=("grouped", "random"), default=None, help="default: from config")
     p.add_argument("--seed", type=int, default=None, help="default: from config")
+    p.add_argument("--seeds", default=None, metavar="S1,S2,...",
+                   help="comma list; run each seed and write aggregate.json (mean/std of accuracy, macro-F1)")
     p.add_argument("--config-dir", default="configs")
     p.add_argument("--out-dir", default="runs")
     p.add_argument("--set", dest="overrides", action="append", default=[], metavar="KEY=VALUE",
@@ -187,6 +222,16 @@ def main(argv=None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     args = build_parser().parse_args(argv)
     cfg = load_config(args.config_dir, args.command.replace("-", "_"), args.task, args.overrides)
+    if args.seed is not None and args.seeds is not None:
+        raise SystemExit("use either --seed or --seeds, not both")
+    seeds = None
+    if args.seeds is not None:
+        try:
+            seeds = [int(t) for t in args.seeds.split(",") if t.strip()]
+        except ValueError:
+            raise SystemExit("--seeds must be a comma list of integers") from None
+        if not seeds:
+            raise SystemExit("--seeds is empty")
     if args.seed is not None:
         cfg["seed"] = args.seed
     if args.split is not None:
@@ -195,11 +240,18 @@ def main(argv=None) -> int:
         raise SystemExit("data_dir is not set (task config or --set data_dir=...)")
     cfg["data_dir"] = os.fspath(cfg["data_dir"])
     if args.command == "svm":
-        run_svm(cfg, args.out_dir)
+        def runner(c):
+            return run_svm(c, args.out_dir)
     else:
         from .train_vit import run_vit
 
-        run_vit(cfg, args.command.split("-", 1)[1], args.out_dir)
+        def runner(c):
+            return run_vit(c, args.command.split("-", 1)[1], args.out_dir)
+    if seeds is None:
+        runner(cfg)
+    else:
+        dirs = [runner({**cfg, "seed": s}) for s in seeds]
+        aggregate_runs(dirs, args.out_dir, cfg["task"], args.command, seeds)
     return 0
 
 

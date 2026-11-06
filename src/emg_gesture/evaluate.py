@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
-from sklearn.metrics import ConfusionMatrixDisplay, confusion_matrix
+from sklearn.metrics import ConfusionMatrixDisplay, confusion_matrix, f1_score
 
 
 def report_eval(y_true, y_pred, labels, names=None, title: str = "Test set", plot: bool = True,
@@ -20,6 +20,7 @@ def report_eval(y_true, y_pred, labels, names=None, title: str = "Test set", plo
     support = cm.sum(axis=1)
     per_class = np.divide(cm.diagonal(), support, out=np.full(len(labels), np.nan), where=support > 0)
     acc = float((y_true == y_pred).mean())
+    macro_f1 = float(f1_score(y_true, y_pred, labels=labels, average="macro", zero_division=0))
     chance_uniform = 1.0 / len(labels)
     chance_majority = float(support.max() / support.sum())
     print(f"{title} accuracy: {acc:.4f}")
@@ -29,6 +30,7 @@ def report_eval(y_true, y_pred, labels, names=None, title: str = "Test set", plo
         print(f"  class {n}: {a:.3f}  (n={s})")
     result = {
         "accuracy": acc,
+        "macro_f1": macro_f1,
         "chance_uniform": chance_uniform,
         "chance_majority": chance_majority,
         "per_class_accuracy": per_class,

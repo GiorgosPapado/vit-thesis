@@ -101,6 +101,13 @@ Still open:
 
 - The `*part*` notebooks (and the 5part/10part scratch ones) perform participant identification, not gesture recognition, and cannot be split by participant; they use a random per-file split.
 - In `*gest*` mode `'random'` the numbers are within-subject and do not measure generalisation to new users.
-- Results are single runs; no confidence intervals or repeated seeds.
+- Results are single runs by default; use `--seeds 1,2,3` (any command) to run several seeds and get an `aggregate.json` (mean and sample std of test accuracy and macro-F1), and report that rather than one test accuracy.
+- ViT "channels" are image planes, not EMG channels: the flattened (time, channels) window is reshaped to 3x224x224 and normalised per plane, so the 3 planes mix time and EMG channels arbitrarily.
+- A single grouped split uses few participants for validation/test, so results depend strongly on which participants land there; a class may be missing from a split (a warning is logged and `metrics.json` records `split_missing_classes` and per-split `class_counts`).
+- Participant-label tasks (`*part*` tasks) are forced to a random per-file split, so train and test contain neighbouring windows of the same sessions; accuracy can be inflated by session adjacency and does not measure generalisation.
+- The random split is stratified by label when every class has at least 2 members (config key `stratify`, top level because `split` is already the mode string); otherwise it falls back with a warning. `metrics.json` records the split mode, why a split was forced to random, and whether stratification was used.
+- Scheduler (`vit_scratch`): the notebooks counted epochs as optimiser steps (`scheduler.step()` per batch with warmup/max given in epochs). The package reproduces that inside `max_epochs` steps but clamps beyond it (LR stays at `eta_min`), so long runs spend most epochs at the floor LR.
+- Checkpoint selection uses validation accuracy with ties broken by lower validation loss.
+- Determinism: `deterministic: true` (config) turns on `torch.use_deterministic_algorithms(True, warn_only=True)` and `CUBLAS_WORKSPACE_CONFIG`. This is best effort only: ops without deterministic kernels just warn, and results can still differ across hardware, torch versions and worker counts.
 - The legacy scratch cells that follow the main pipeline in `vit_train_from_scratch_5gest`, `_5part` and `_10part` were not updated (marked in a markdown cell); `folders_creation`, `code_reproduction_max_samples`, `pca_components_search` and `mlflow_plotting` were not touched.
 - The `vit_google` notebooks still pass already standardised inputs through the Hugging Face feature extractor, which applies its own fixed normalisation on top.
