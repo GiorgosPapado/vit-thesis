@@ -1,5 +1,11 @@
 # %%
+import argparse
 import os
+
+_parser = argparse.ArgumentParser()
+_parser.add_argument("--data-dir", default=os.environ.get("DATA_DIR", "/home/vcl3d/coco_dataset_VOX"), help="COCO VOX dataset root (env: DATA_DIR)")
+_args, _ = _parser.parse_known_args()
+DATA_DIR = _args.data_dir
 import datasets
 from transformers import VisionEncoderDecoderModel, AutoFeatureExtractor,AutoTokenizer
 os.environ["WANDB_DISABLED"] = "true"
@@ -154,7 +160,7 @@ def limit_words(text, word_limit=200):
         return ' '.join(words[:word_limit]) + '...'  # Add ellipsis if text is truncated
     return text
 
-text_files_path = '/home/vcl3d/coco_dataset_VOX/train2014_desc'
+text_files_path = os.path.join(DATA_DIR, 'train2014_desc')
 text_files = [file for file in os.listdir(text_files_path) if file.endswith('_desc.txt')]
 text_files = sorted(text_files)
 # Create a dictionary to store text descriptions with image filenames (without extension) as keys
@@ -186,7 +192,7 @@ dataset = dataset.add_column("file_name", image_filenames)
 
 # %%
 #EVALUATION
-val_text_files_path = '/home/vcl3d/coco_dataset_VOX/val2014_desc'
+val_text_files_path = os.path.join(DATA_DIR, 'val2014_desc')
 val_text_files = [file for file in os.listdir(val_text_files_path) if file.endswith('_desc.txt')]
 val_text_files = sorted(val_text_files)
 
@@ -376,7 +382,7 @@ trainer.save_model("./image-captioning-output-107epochs")
 tokenizer.save_pretrained("./image-captioning-output-107epochs")
 
 from transformers import pipeline
-image_captioner = pipeline("image-to-text", model="./image-captioning-output-106epochs", max_new_tokens=10)
+image_captioner = pipeline("image-to-text", model="./image-captioning-output-107epochs", max_new_tokens=10)
 dataset["image"][5]
 image_captioner(dataset['image'][5])
 image_captioner("test_images/COCO_test2015_000000000014.jpg")
