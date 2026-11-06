@@ -2,4 +2,4 @@ task: 17participants
 data_dir: 17participants
 label: participant
 n_classes: 17
-split: random   # participant label cannot be grouped by participant
+split: random   # convenience only: runs.resolve_split is the authority and forces random for participant labels

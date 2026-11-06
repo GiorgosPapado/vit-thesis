@@ -18,15 +18,21 @@ train:
   eps: 1.0e-6        # transformers.AdamW default used by the notebook
   grad_clip: 1.0
   num_workers: 0
-  # The notebooks called scheduler.step() once per BATCH but counted warmup_epochs/max_epochs as if per epoch,
-  # i.e. epochs were treated as optimiser steps. Kept as-is inside max_epochs (units are optimiser steps);
-  # beyond max_epochs steps the step is CLAMPED and the LR stays at eta_min. With many batches per epoch the
-  # schedule therefore ends early (e.g. 500 steps = a few epochs). Set scheduler: null to disable.
+  # Schedule is stepped once per BATCH.
+  # Default (legacy_epoch_units: false): real optimiser steps. total = epochs * len(train_loader),
+  #   warmup = warmup_epochs * len(train_loader); max_epochs is ignored. The floor is eta_min_ratio * lr
+  #   (if set) else eta_min (absolute), default 0.0 as in the notebook formula.
+  # legacy_epoch_units: true reproduces the thesis runs: the notebooks counted warmup_epochs/max_epochs as
+  #   optimiser STEPS, so with many batches per epoch the cosine finished after max_epochs steps (a few
+  #   epochs) and the LR then sat at eta_min (the step is clamped). Uses max_epochs as given.
+  # Set scheduler: null to disable.
   scheduler:
     name: warmup_cosine
+    legacy_epoch_units: false
     warmup_epochs: 5
-    max_epochs: 500
+    max_epochs: 500     # only used when legacy_epoch_units: true
     eta_min: 0.0
+    eta_min_ratio: null  # floor as a fraction of lr; overrides eta_min when set
 augment:
   enabled: true
   noise_factor: 0.05

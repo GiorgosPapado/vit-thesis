@@ -11,7 +11,8 @@ pytest.importorskip("torch")
 pytest.importorskip("transformers")
 
 from emg_gesture import train_vit  # noqa: E402
-from emg_gesture.cli import TASKS, load_config, main  # noqa: E402
+from emg_gesture.cli import TASKS, main  # noqa: E402
+from emg_gesture.runs import load_config  # noqa: E402
 
 CONFIGS = Path(__file__).resolve().parents[1] / "configs"
 TINY_MODEL = {"image_size": 32, "patch_size": 8, "hidden_size": 16, "num_attention_heads": 2,
@@ -194,3 +195,64 @@ def test_vit_scratch_seeds_aggregate(mat_dir, tmp_path):
     (agg,) = [p for p in out.iterdir() if "aggregate" in p.name]
     data = json.loads((agg / "aggregate.json").read_text())
     assert data["seeds"] == [1, 2] and len(data["per_seed"]) == 2 and "macro_f1" in data
+
+
+def _lrs(scfg, epochs, spe, lr=1.0):
+    plan = train_vit.scheduler_plan(scfg, epochs, spe, lr)
+    return [plan["fn"](i) * lr for i in range(plan["info"]["total_steps"])], plan["info"]
+
+
+def test_scheduler_default_uses_real_optimiser_steps():
+    scfg = {"name": "warmup_cosine", "warmup_epochs": 5, "max_epochs": 500, "eta_min": 0.0}
+    lrs, info = _lrs(scfg, 50, 20)
+    assert info["mode"] == "optimiser_steps" and info["total_steps"] == 1000 and info["warmup_steps"] == 100
+    assert lrs[99] == pytest.approx(1.0)  # peak at the end of warmup
+    assert lrs[100] == pytest.approx(1.0)
+    after = lrs[100:]
+    assert all(a >= b - 1e-12 for a, b in zip(after, after[1:]))
+    assert lrs[-1] < 1e-3  # approaches the floor (0) at the last step
+    assert sum(v > 0 for v in lrs) >= 0.9 * len(lrs)
+    plan = train_vit.scheduler_plan(scfg, 50, 20, 1.0)
+    assert plan["fn"](1000) == 0.0  # exactly the floor only after the final step
+
+
+def test_scheduler_default_floor_ratio():
+    scfg = {"name": "warmup_cosine", "warmup_epochs": 1, "max_epochs": 9, "eta_min_ratio": 0.1}
+    lrs, _ = _lrs(scfg, 10, 5)
+    assert min(lrs) >= 0.1 - 1e-12 and lrs[-1] == pytest.approx(0.1, abs=1e-2)
+
+
+def test_scheduler_legacy_matches_previous_behaviour():
+    scfg = {"name": "warmup_cosine", "legacy_epoch_units": True, "warmup_epochs": 5, "max_epochs": 500}
+    plan = train_vit.scheduler_plan(scfg, 3, 1000, 1e-4)
+    ref = train_vit.warmup_cosine_lambda(5, 500, 0.0, 1e-4)
+    assert plan["info"]["mode"] == "legacy_epoch_units" and plan["info"]["total_steps"] == 500
+    assert all(plan["fn"](i) == ref(i) for i in (0, 4, 5, 255, 499, 500, 5000))
+    assert plan["fn"](500) == 0.0
+    guard = train_vit.scheduler_plan({**scfg, "warmup_epochs": 20, "max_epochs": 10}, 3, 100, 1.0)["fn"]
+    assert all(0.0 <= guard(i) <= 1.0 for i in range(30))
+
+
+def test_metrics_record_scheduler_mode(mat_dir, tmp_path):
+    run = _run("scratch", "10gest", mat_dir, tmp_path / "runs", "train.epochs=2",
+               "train.scheduler.legacy_epoch_units=true")
+    m = json.loads((run / "metrics.json").read_text())
+    assert m["scheduler"]["mode"] == "legacy_epoch_units"
+    run = _run("scratch", "10gest", mat_dir, tmp_path / "runs2", "train.epochs=2")
+    m = json.loads((run / "metrics.json").read_text())
+    assert m["scheduler"]["mode"] == "optimiser_steps" and m["scheduler"]["total_steps"] % 2 == 0
+
+
+def test_bad_tracking_uri_leaves_no_run_dir(mat_dir, tmp_path, monkeypatch):
+    import sys
+    import types
+
+    fake = types.ModuleType("mlflow")
+    fake.set_tracking_uri = fake.set_experiment = lambda *a, **k: None
+    monkeypatch.setitem(sys.modules, "mlflow", fake)
+    cfg = load_config(CONFIGS, "vit_scratch", "10gest",
+                      [f"data_dir={mat_dir}", *TINY, "tracking.enabled=true", "tracking.uri=/abs/path"])
+    out = tmp_path / "runs"
+    with pytest.raises(ValueError, match="absolute"):
+        train_vit.run_vit(cfg, "scratch", out)
+    assert not out.exists() or not any(out.iterdir())

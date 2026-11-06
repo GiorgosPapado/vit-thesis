@@ -29,6 +29,7 @@ from .data import (
     split_report,
 )
 from .evaluate import report_eval
+from .runs import resolve_split, unique_run_dir
 from .seed import data_generator, seed_worker, set_seed
 from .tracking import Tracker
 
@@ -127,6 +128,29 @@ def warmup_cosine_lambda(warmup: int, max_steps: int, eta_min: float = 0.0, base
     return f
 
 
+def scheduler_plan(scfg: dict, epochs: int, steps_per_epoch: int, base_lr: float) -> dict:
+    """Resolve the scratch warmup+cosine schedule to a lambda plus a description for metrics.json.
+
+    Default (``legacy_epoch_units: false``): real optimiser steps, ``total = epochs * steps_per_epoch``,
+    ``warmup = warmup_epochs * steps_per_epoch`` (``max_epochs`` is ignored). Floor ratio is
+    ``eta_min_ratio`` if given, else ``eta_min / lr``, else 0. The LR applied to the last optimiser step is
+    already > floor; the floor (0 by default) is reached only by the final scheduler.step() after training.
+    ``legacy_epoch_units: true``: warmup_epochs/max_epochs are used as step counts (thesis behaviour).
+    """
+    legacy = bool(scfg.get("legacy_epoch_units", False))
+    if scfg.get("eta_min_ratio") is not None:
+        eta_min = float(scfg["eta_min_ratio"]) * base_lr
+    else:
+        eta_min = float(scfg.get("eta_min", 0.0))
+    if legacy:
+        warmup, total = int(scfg["warmup_epochs"]), int(scfg["max_epochs"])
+    else:
+        warmup, total = int(scfg["warmup_epochs"]) * steps_per_epoch, int(epochs) * steps_per_epoch
+    return {"fn": warmup_cosine_lambda(warmup, total, eta_min, base_lr),
+            "info": {"mode": "legacy_epoch_units" if legacy else "optimiser_steps", "warmup_steps": warmup,
+                     "total_steps": total, "steps_per_epoch": steps_per_epoch, "eta_min": eta_min}}
+
+
 class AugmentedDataset:
     """Applies :func:`augment_data` to a dataset with a seeded Generator.
 
@@ -211,9 +235,8 @@ def fit(model, train_loader, val_loader, tcfg: dict, device, preprocess, best_pa
     if scfg:
         if scfg.get("name") != "warmup_cosine":
             raise ValueError("scheduler.name must be 'warmup_cosine'")
-        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, warmup_cosine_lambda(
-            int(scfg["warmup_epochs"]), int(scfg["max_epochs"]), float(scfg.get("eta_min", 0.0)),
-            float(tcfg["lr"])))
+        plan = scheduler_plan(scfg, int(tcfg["epochs"]), len(train_loader), float(tcfg["lr"]))
+        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, plan["fn"])
     clip = tcfg.get("grad_clip")
     model.to(device)
     # DataParallel only when several GPUs are present; state_dicts are always saved from the bare module.
@@ -269,8 +292,6 @@ def run_vit(cfg: dict, mode: str, out_dir="runs", tracker: Tracker | None = None
     import matplotlib.pyplot as plt
     import torch
     from torch.utils.data import DataLoader
-
-    from .cli import _unique_run_dir, resolve_split
 
     cfg = copy.deepcopy(cfg)
     seed = int(cfg["seed"])
@@ -329,10 +350,10 @@ def run_vit(cfg: dict, mode: str, out_dir="runs", tracker: Tracker | None = None
     preprocess = make_preprocessor(mode, model_cfg)
 
     method = f"vit-{mode}"
-    run_dir = _unique_run_dir(out_dir, task, method, seed)
+    tracker = tracker or Tracker(cfg, experiment=task)  # before the run dir: a bad tracking.uri leaves nothing behind
+    run_dir = unique_run_dir(out_dir, task, method, seed)
     with open(run_dir / "config.resolved.yaml", "w", encoding="utf8") as f:
         yaml.safe_dump(cfg, f, sort_keys=False)
-    tracker = tracker or Tracker(cfg, experiment=task)
     tracker.start(run_name=run_dir.name, params=cfg)
     try:
         best_path = run_dir / "best_model.pth"
@@ -349,6 +370,8 @@ def run_vit(cfg: dict, mode: str, out_dir="runs", tracker: Tracker | None = None
                           title=f"Test set (ViT {mode}, {task})")
 
         metrics = {
+            "scheduler": (scheduler_plan(tcfg["scheduler"], int(tcfg["epochs"]), len(train_loader),
+                                         float(tcfg["lr"]))["info"] if tcfg.get("scheduler") else None),
             "task": task, "method": method, "split": cfg["split"], "split_forced_reason": forced_reason,
             **split_report(labels, train_idx, val_idx, test_idx, split_info), "seed": seed, "device": device.type,
             "n_train": int(len(train_idx)), "n_val": int(len(val_idx)), "n_test": int(len(test_idx)),

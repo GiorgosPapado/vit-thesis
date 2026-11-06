@@ -25,3 +25,23 @@ def make_mat_files(root, participants=(1, 2, 3, 4, 5, 6), gestures=(1, 2, 3), tr
 def mat_dir(tmp_path):
     make_mat_files(tmp_path)
     return tmp_path
+
+
+def pytest_configure(config):
+    """With REQUIRE_TORCH=1 (make test-all) a missing torch is an error, not a silent skip."""
+    import importlib.util
+    import os
+
+    if os.environ.get("REQUIRE_TORCH") == "1":
+        missing = [m for m in ("torch", "transformers") if importlib.util.find_spec(m) is None]
+        if missing:
+            raise pytest.UsageError(f"REQUIRE_TORCH=1 but not installed: {', '.join(missing)}")
+
+
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    """With REQUIRE_TORCH=1, any skipped test fails the run (skips would hide torch tests)."""
+    import os
+
+    if os.environ.get("REQUIRE_TORCH") == "1" and terminalreporter.stats.get("skipped"):
+        terminalreporter.write_line("REQUIRE_TORCH=1: tests were skipped, failing", red=True)
+        terminalreporter._session.exitstatus = 1

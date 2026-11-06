@@ -99,6 +99,16 @@ def resolve_settings(args: argparse.Namespace) -> Dict[str, Any]:
     return cfg
 
 
+def build_trainer(trainer_cls, processor, **kwargs):
+    """Instantiate ``trainer_cls`` passing the processor as ``processing_class`` (new transformers) or
+    ``tokenizer`` (older versions), chosen by inspecting the constructor signature."""
+    import inspect
+
+    params = inspect.signature(trainer_cls.__init__).parameters
+    key = "processing_class" if "processing_class" in params else "tokenizer"
+    return trainer_cls(**{key: processor}, **kwargs)
+
+
 def main(argv: Optional[Sequence[str]] = None) -> None:
     cfg = resolve_settings(build_parser().parse_args(argv))
     os.environ.setdefault("WANDB_DISABLED", "true")
@@ -168,9 +178,10 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
     fields = [f.name for f in dataclasses.fields(Seq2SeqTrainingArguments)]
     args = Seq2SeqTrainingArguments(**build_training_kwargs(cfg, out_dir, fields))
-    trainer = Seq2SeqTrainer(
+    trainer = build_trainer(
+        Seq2SeqTrainer,
+        feature_extractor,
         model=model,
-        tokenizer=feature_extractor,
         args=args,
         compute_metrics=compute_metrics,
         train_dataset=train_ds,

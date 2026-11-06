@@ -6,7 +6,8 @@ import numpy as np
 import pytest
 import yaml
 
-from emg_gesture.cli import TASKS, load_config, main
+from emg_gesture.cli import TASKS, main
+from emg_gesture.runs import load_config
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIGS = ROOT / "configs"
@@ -72,12 +73,13 @@ def test_parity_with_svm_10gest_notebook(mat_dir, tmp_path):
     the same seed, split mode, test size and hyper-parameters, and the CV scores must match too.
     """
     nb_path = ROOT / "03_experiments" / "archive" / "svm_10gest.ipynb"
-    if not nb_path.exists():
-        pytest.skip("notebook not available")
+    assert nb_path.exists(), f"parity notebook missing: {nb_path}"
     cells = [c for c in json.loads(nb_path.read_text(encoding="utf8"))["cells"] if c["cell_type"] == "code"]
     sources = ["".join(c["source"]) for c in cells]
-    wanted = [s for s in sources if "root_folder" in s or "SPLIT_MODE" in s or "ChannelStandardizer" in s]
-    assert len(wanted) == 3
+    markers = ("root_folder", "SPLIT_MODE", "ChannelStandardizer")
+    wanted = [s for s in sources if any(m in s for m in markers)]
+    for m in markers:  # each required piece must be present in some selected cell
+        assert any(m in s for s in wanted), f"no notebook cell contains {m!r}"
     ns = {"SEED": 42, "__name__": "nb"}
     for src in wanted:
         src = (src.replace("'s1_s2_s3_matfiles_10gest'", repr(str(mat_dir)))

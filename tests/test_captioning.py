@@ -107,3 +107,16 @@ def test_transformers_training_args_accept_kwargs(tmp_path):
     fields = [f.name for f in dataclasses.fields(tf.Seq2SeqTrainingArguments)]
     args = tf.Seq2SeqTrainingArguments(**train.build_training_kwargs({"seed": 5}, tmp_path, fields))
     assert args.seed == 5
+
+
+def test_build_trainer_picks_processing_class_or_tokenizer():
+    class New:
+        def __init__(self, model=None, processing_class=None):
+            self.kw = {"model": model, "processing_class": processing_class}
+
+    class Old:
+        def __init__(self, model=None, tokenizer=None):
+            self.kw = {"model": model, "tokenizer": tokenizer}
+
+    assert train.build_trainer(New, "proc", model="m").kw == {"model": "m", "processing_class": "proc"}
+    assert train.build_trainer(Old, "proc", model="m").kw == {"model": "m", "tokenizer": "proc"}
