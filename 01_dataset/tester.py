@@ -1,3 +1,11 @@
+import argparse
+import os
+
+_parser = argparse.ArgumentParser()
+_parser.add_argument("--data-dir", default=os.environ.get("DATA_DIR", "/home/vcl3d/coco_dataset_VOX_5000"), help="COCO VOX dataset root (env: DATA_DIR)")
+_args, _ = _parser.parse_known_args()
+DATA_DIR = _args.data_dir
+
 # %%
 import os
 import datasets
@@ -60,7 +68,7 @@ def list_items_in_folder(folder_path):
     return items_list
 
 # Replace 'folder_path' with the path to the folder you want to read
-folder_path = '/home/vcl3d/coco_dataset_VOX_5000/train2014'
+folder_path = os.path.join(DATA_DIR, 'train2014')
 items_list = list_items_in_folder(folder_path)
 items_list = sorted(items_list)
 # Print the list of items in the folder
@@ -68,7 +76,7 @@ items_list = sorted(items_list)
 
 # %%
 #DEPTH
-depth_path = '/home/vcl3d/coco_dataset_VOX_5000/train2014_d'
+depth_path = os.path.join(DATA_DIR, 'train2014_d')
 depth_list = list_items_in_folder(depth_path)
 depth_list = sorted(depth_list)
 #print(depth_list)
@@ -149,7 +157,7 @@ def remove_numbers(text_descriptions):
 
 # %%
 #DEPTH
-text_files_path = '/home/vcl3d/coco_dataset_VOX_5000/train2014_desc'
+text_files_path = os.path.join(DATA_DIR, 'train2014_desc')
 text_files = [file for file in os.listdir(text_files_path) if file.endswith('_desc.txt')]
 text_files = sorted(text_files)
 #text_files = sorted(text_files[:100])
@@ -183,7 +191,7 @@ depth_dataset = depth_dataset.add_column("image_id", depth_image_id_list)
 depth_dataset = depth_dataset.add_column("file_name", image_filenames)
 
 # %%
-text_files_path = '/home/vcl3d/coco_dataset_VOX_5000/train2014_desc'
+text_files_path = os.path.join(DATA_DIR, 'train2014_desc')
 text_files = [file for file in os.listdir(text_files_path) if file.endswith('_desc.txt')]
 text_files = sorted(text_files)
 #text_files = sorted(text_files[:100])

@@ -50,40 +50,16 @@ tokenizer.save_pretrained(output_dir)
 
 import pandas as pd
 from datasets import Dataset
-# Load the CSV file into a pandas DataFrame
-# df = pd.read_csv('train_dataset.csv')
-# dataset_dict = df.to_dict(orient='list')
-# dataset = Dataset.from_dict(dataset_dict)
 
-# val_df = pd.read_csv('val_dataset.csv')
-# val_dataset_dict = val_df.to_dict(orient='list')
-# val_dataset = Dataset.from_dict(val_dataset_dict)
-#val_dataset = val_dataset.remove_columns("Unnamed: 0")
 import torch
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(device)
 
-# from torch.utils.data import Dataset
 
-# class CustomTensorDataset(Dataset):
-#     def __init__(self, file_paths):
-#         self.file_paths = file_paths
 
-#     def __len__(self):
-#         return len(self.file_paths)
 
-#     def __getitem__(self, idx):
-#         # Load the tensor from file using streaming or any other technique
-#         tensor = torch.load(self.file_paths[idx])
-#         return tensor
     
-# # Define file paths for your training and validation tensors
-# train_file_paths = ['full_training_tensor.pt']
-# val_file_paths = ['f16val_tensor_data.pt']
 
-# # Create instances of the CustomTensorDataset class
-# train_dataset = CustomTensorDataset(train_file_paths)
-# val_dataset = CustomTensorDataset(val_file_paths)
 
 
 
