@@ -65,9 +65,23 @@ MIT, see [LICENSE](LICENSE).
 
 These points come from a code review of the notebooks; they are not experimental results.
 
-- The `*part*` notebooks use participant ID as the label, so they perform participant identification, not gesture recognition.
-- The `*gest*` notebooks split randomly by file without grouping by participant or session, so reported numbers are within-subject and do not measure generalisation to new users.
-- The `vit_google` notebooks use the test set as the validation set every epoch.
-- No random seeds are set and results come from single runs.
-- Only accuracy is reported.
-- `svm_10part` computes PCA features but fits on the raw features, and the PCA is fit before cross-validation.
+**Important: the fixes below were made in the notebook code only. None of the notebooks has been re-run since, and the stored outputs of the edited cells were cleared. Any accuracy numbers published or reported from earlier runs (thesis text, slides, earlier READMEs) used the old, flawed code and are NOT comparable with what the current notebooks will produce. Re-run everything before quoting a number.**
+
+Fixed in code (not re-run):
+
+- Seeds: every `svm_*` / `vit_*` notebook now starts with a seed cell (`SEED = 42`; `random`, NumPy, torch/CUDA, DataLoader `generator` / `worker_init_fn`). Results still come from a single run, and GPU runs are not guaranteed bit-exact.
+- SVM: StandardScaler, PCA and SVC are in one scikit-learn `Pipeline`, and that pipeline is what gets cross-validated, fitted and scored, so PCA is fitted inside each fold (previously `svm_10part` / `svm_5part` / `svm_17participants` computed PCA features but fitted on the raw features, and PCA was fitted before cross-validation). `svm_5gest` and `svm_17participants` previously had no cross-validation; it was added.
+- ViT: the per-epoch evaluation computes its own loss with the criterion on each evaluation batch (the `vit_google` notebooks reused the last training loss), train/validation loss are averaged over batches, and train accuracy is computed over the whole epoch.
+- ViT: a separate validation split is held out from the training data; checkpoints are selected on validation accuracy; the test set is evaluated once, after training (previously the test set doubled as the validation set every epoch, including for checkpoint selection in `vit_train_from_scratch`).
+- `*gest*` notebooks (including the `17participants` ones, whose label is the gesture): a `SPLIT_MODE` variable selects a participant-grouped split (`'grouped'`, default, `GroupShuffleSplit`) or the old random per-file split (`'random'`). The participant ID is parsed from the filename token containing `participant`; this was verified from the parsing code in `folders_creation.ipynb` only, not against the real files, and it assumes the same participant number means the same person across the mixed sessions.
+- Normalisation: the per-sample min-max scaling was replaced by per-channel mean/std computed on the training data only and applied to train / validation / test (SVM: per-EMG-channel, inside the pipeline; ViT: per channel of the 3x224x224 array built from the flattened window, with a zero-std guard).
+- Final evaluation cells report the confusion matrix, per-class accuracy and chance level (uniform and majority-class) in addition to accuracy.
+- The `*part*` notebooks now state at the top that the label is the participant ID (identification task).
+
+Still open:
+
+- The `*part*` notebooks (and the 5part/10part scratch ones) perform participant identification, not gesture recognition, and cannot be split by participant; they use a random per-file split.
+- In `*gest*` mode `'random'` the numbers are within-subject and do not measure generalisation to new users.
+- Results are single runs; no confidence intervals or repeated seeds.
+- The legacy scratch cells that follow the main pipeline in `vit_train_from_scratch_5gest`, `_5part` and `_10part` were not updated (marked in a markdown cell); `folders_creation`, `code_reproduction_max_samples`, `pca_components_search` and `mlflow_plotting` were not touched.
+- The `vit_google` notebooks still pass already standardised inputs through the Hugging Face feature extractor, which applies its own fixed normalisation on top.
