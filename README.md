@@ -7,10 +7,11 @@ Code for my MSc thesis, *Vision Transformer for Gesture Recognition from EMG Sig
 ## Repository layout
 
 ```
-01_dataset/      captioning side work (not the EMG thesis): COCO/VOX dataset scripts
-                 (copy_files.py, remove_empty.py, python_train_5000.py), scratch checks
-                 (tester.py, testexport.py) and notebooks (vitgpt2.ipynb, test_gpt.ipynb)
-02_training/     captioning side work: ViT-GPT2 training (train.py, training_version.ipynb)
+01_dataset/      captioning side work (not the EMG thesis): tester.py (RGB+depth experiment),
+                 notebooks (vitgpt2.ipynb, test_gpt.ipynb); archive/ = scripts superseded by src/captioning
+02_training/     captioning side work: training_version.ipynb; archive/train.py superseded by src/captioning
+src/captioning/  captioning side package: `captioning subset|remove-empty|train|infer`
+                 (configs/captioning.yaml; DATA_DIR / OUTPUT_DIR env or --data-dir / --output-dir)
 03_experiments/  the EMG thesis experiments
   code_reproduction_max_samples.ipynb
   pca_components_search.ipynb      PCA analysis
@@ -24,7 +25,7 @@ requirements.txt         direct dependencies
 requirements-freeze.txt  full original environment freeze
 ```
 
-The `01_dataset/` scripts take `--data-dir` (or the `DATA_DIR` env var) for the dataset root. Outputs were stripped from the large notebooks to keep the repository small, so re-run them to regenerate results.
+The `captioning` commands take `--data-dir` (or `DATA_DIR`) for the dataset root and `--output-dir` (or `OUTPUT_DIR`). Outputs were stripped from the large notebooks to keep the repository small, so re-run them to regenerate results.
 
 Notebook suffixes mean the experimental split: `5gest` / `10gest` (5 or 10 gesture classes), `5part` / `10part` / `17participants` (number of participants).
 
@@ -54,7 +55,7 @@ pip install -r requirements.txt
 
 ## Reproduce
 
-1. Build the dataset: `01_dataset/` scripts (see comments at the top of each).
+1. Build the dataset (EMG): see `scripts/`. (Captioning side work is independent: `captioning --help`.)
 2. Create the task folders: `python scripts/prepare_folders.py --source-dir SRC --dest-dir DATA --task all` (try `--dry-run` first; the script docstring lists the original notebook's open quirks).
 3. Run the experiments per task `T` (`10gest 5gest 17participants 10part 5part`): `emg-gesture svm --task T`, then `emg-gesture vit-google --task T`, then `emg-gesture vit-scratch --task T`, each with `--set data_dir=DATA/<task folder>`.
 4. Optional: `03_experiments/mlflow_plotting.ipynb` for plots from tracked runs.

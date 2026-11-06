@@ -1,0 +1,14 @@
+# ViT-GPT2 captioning (side work). Paths: pass --data-dir/--output-dir or set DATA_DIR/OUTPUT_DIR.
+seed: 42
+image_encoder_model: google/vit-base-patch16-224-in21k
+text_decoder_model: gpt2
+batch_size: 24
+num_train_epochs: 10
+max_target_length: 200
+word_limit: 50
+eval_strategy: epoch      # mapped to evaluation_strategy on transformers<4.41 (requirements pin 4.30.2)
+train_images: resized_train
+val_images: resized_val
+train_desc: train2014_desc
+val_desc: val2014_desc
+# resume_from_checkpoint: path/to/checkpoint-8000
