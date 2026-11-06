@@ -316,7 +316,8 @@ def run_vit(cfg: dict, mode: str, out_dir="runs", tracker: Tracker | None = None
 
     train_idx, val_idx, test_idx, split_info = split_files_info(
         files, labels, mode=cfg["split"], test_size=cfg["test_size"], val_size=cfg["val_size"], seed=seed,
-        stratify=cfg.get("stratify", True))
+        stratify=cfg.get("stratify", True), train_sessions=cfg.get("train_sessions", (1, 2)),
+        test_sessions=cfg.get("test_sessions", (3,)))
     if len(val_idx) == 0 or len(test_idx) == 0:
         raise ValueError("validation or test split is empty; add data or adjust test_size/val_size")
 

@@ -80,7 +80,8 @@ def run_svm(cfg: dict, out_dir="runs") -> Path:
 
     train_idx, val_idx, test_idx, split_info = split_files_info(
         files, labels, mode=cfg["split"], test_size=cfg["test_size"], val_size=0.0, seed=seed,
-        stratify=cfg.get("stratify", True))
+        stratify=cfg.get("stratify", True), train_sessions=cfg.get("train_sessions", (1, 2)),
+        test_sessions=cfg.get("test_sessions", (3,)))
     X_train = np.array([load_flattened(files[i], cfg["target_length"]) for i in train_idx])
     X_test = np.array([load_flattened(files[i], cfg["target_length"]) for i in test_idx])
     y_train, y_test = labels[train_idx], labels[test_idx]
@@ -133,7 +134,7 @@ def run_svm(cfg: dict, out_dir="runs") -> Path:
 
 def _add_common_options(p) -> None:
     p.add_argument("--task", required=True, choices=TASKS)
-    p.add_argument("--split", choices=("grouped", "random"), default=None, help="default: from config")
+    p.add_argument("--split", choices=("grouped", "random", "session"), default=None, help="default: from config")
     p.add_argument("--seed", type=int, default=None, help="default: from config")
     p.add_argument("--seeds", default=None, metavar="S1,S2,...",
                    help="comma list; run each seed and write aggregate.json (mean/std of accuracy, macro-F1)")

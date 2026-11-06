@@ -72,6 +72,6 @@ def resolve_split(cfg: dict, task: str):
         reason = "participant label: a participant-grouped split would remove every class from training"
         log.warning("Task %s uses participant as the label: split forced to 'random' (was %r).", task, cfg["split"])
         cfg["split"] = "random"
-    if cfg["split"] not in ("grouped", "random"):
-        raise ValueError("split must be 'grouped' or 'random'")
+    if cfg["split"] not in ("grouped", "random", "session"):
+        raise ValueError("split must be 'grouped', 'random' or 'session'")
     return reason

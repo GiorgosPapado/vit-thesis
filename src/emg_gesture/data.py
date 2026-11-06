@@ -44,6 +44,11 @@ def extract_group_from_filename(filepath: str):
     return _extract_int(filepath, "participant")
 
 
+def extract_session_from_filename(filepath: str):
+    """Session number from the ``session<k>`` filename token, or None if absent."""
+    return _extract_int(filepath, "session")
+
+
 def list_mat_files(root: str) -> list:
     """Sorted list of ``*.mat`` files directly under ``root``."""
     return sorted(glob.glob(os.path.join(root, "*.mat")))
@@ -123,8 +128,57 @@ def _stratified_random(idx, labels, test_size, val_size, seed):
     return train, val, test
 
 
+def _session_split(files, y, val_size, seed, train_sessions, test_sessions, info):
+    """Cross-session split (thesis protocol): train on ``train_sessions``, test on ``test_sessions``.
+
+    Validation is a random per-file fraction (``val_size``) of the TRAIN-session files; the thesis
+    described no validation set, so this is our choice. Files from other sessions are excluded.
+    """
+    train_sessions = sorted({int(k) for k in train_sessions})
+    test_sessions = sorted({int(k) for k in test_sessions})
+    if not train_sessions or not test_sessions:
+        raise ValueError("train_sessions and test_sessions must both be non-empty")
+    if set(train_sessions) & set(test_sessions):
+        raise ValueError("train_sessions and test_sessions must be disjoint")
+    sess = [extract_session_from_filename(f) for f in files]
+    bad = [os.path.basename(f) for f, k in zip(files, sess) if k is None]
+    if bad:
+        raise ValueError(f"session split: no 'session<k>' token in {len(bad)} filename(s), e.g. {bad[0]!r}")
+    sess = np.array(sess)
+    trainval = np.flatnonzero(np.isin(sess, train_sessions))
+    test = np.flatnonzero(np.isin(sess, test_sessions))
+    if len(trainval) == 0 or len(test) == 0:
+        raise ValueError(f"session split: no files for train sessions {train_sessions} or test sessions "
+                         f"{test_sessions} (found sessions {sorted(set(sess.tolist()))})")
+    if val_size > 0:
+        strat = None
+        if y is not None:
+            _, counts = np.unique(y[trainval], return_counts=True)
+            if counts.min() >= 2:
+                strat = y[trainval]
+        try:
+            train, val = train_test_split(trainval, test_size=val_size, random_state=seed, stratify=strat)
+            info["stratified"] = strat is not None
+        except ValueError:
+            train, val = train_test_split(trainval, test_size=val_size, random_state=seed)
+    else:
+        train, val = trainval, trainval[:0]
+    if (set(train) & set(val)) or (set(train) & set(test)) or (set(val) & set(test)):
+        raise AssertionError("a file appears in two splits")
+    info["train_sessions"], info["test_sessions"] = train_sessions, test_sessions
+    if y is not None:
+        allc = set(np.unique(y).tolist())
+        for name, sub in (("train", train), ("val", val), ("test", test)):
+            missing = sorted(allc - set(y[sub].tolist())) if len(sub) else []
+            if missing:
+                info["missing_classes"][name] = [int(m) for m in missing]
+                log.warning("Session split: class(es) %s absent from the %s split.", missing, name)
+    return train, val, test
+
+
 def split_files_info(files, labels=None, mode: str = "grouped", test_size: float = 0.2,
-                     val_size: float = 0.2, seed: int = 42, stratify=None):
+                     val_size: float = 0.2, seed: int = 42, stratify=None,
+                     train_sessions=(1, 2), test_sessions=(3,)):
     """Split into (train, val, test) index arrays plus an info dict.
 
     mode 'random': per-file train_test_split, stratified by label unless ``stratify`` is False
@@ -134,13 +188,19 @@ def split_files_info(files, labels=None, mode: str = "grouped", test_size: float
     non-empty split. Validation is carved out of the train portion (``val_size`` is a fraction of
     train+val); ``val_size=0`` gives an empty validation set.
 
+    mode 'session': cross-session split (see :func:`_session_split`); ``test_size`` is ignored and
+    ``val_size`` is a fraction of the train-session files.
+
     ``info`` has ``mode``, ``stratified`` (bool), ``stratify_fallback_reason`` (str or None) and, in grouped
     mode, ``missing_classes`` ({'train'|'val'|'test': [labels absent from that non-empty split]}).
     """
     files = list(files)
     idx = np.arange(len(files))
     y = None if labels is None else np.asarray(labels)
-    info = {"mode": mode, "stratified": False, "stratify_fallback_reason": None, "missing_classes": {}}
+    info = {"mode": mode, "stratified": False, "stratify_fallback_reason": None, "missing_classes": {},
+            "train_sessions": None, "test_sessions": None}
+    if mode == "session":
+        return (*_session_split(files, y, val_size, seed, train_sessions, test_sessions, info), info)
     if mode == "random":
         out = None
         if stratify is not False:
@@ -169,7 +229,7 @@ def split_files_info(files, labels=None, mode: str = "grouped", test_size: float
             out = (train, val, test)
         return (*out, info)
     if mode != "grouped":
-        raise ValueError("mode must be 'grouped' or 'random'")
+        raise ValueError("mode must be 'grouped', 'random' or 'session'")
     groups = np.array([extract_group_from_filename(f) for f in files], dtype=object)
     if any(g is None for g in groups):
         raise ValueError("could not parse a participant id from every filename")
@@ -197,9 +257,11 @@ def split_files_info(files, labels=None, mode: str = "grouped", test_size: float
 
 
 def split_files(files, labels=None, mode: str = "grouped", test_size: float = 0.2,
-                val_size: float = 0.2, seed: int = 42, stratify=None):
+                val_size: float = 0.2, seed: int = 42, stratify=None,
+                train_sessions=(1, 2), test_sessions=(3,)):
     """:func:`split_files_info` without the info dict: returns (train, val, test) index arrays."""
-    return split_files_info(files, labels, mode, test_size, val_size, seed, stratify)[:3]
+    return split_files_info(files, labels, mode, test_size, val_size, seed, stratify,
+                            train_sessions, test_sessions)[:3]
 
 
 def split_report(labels, train, val, test, info: dict) -> dict:
@@ -212,6 +274,8 @@ def split_report(labels, train, val, test, info: dict) -> dict:
 
     return {
         "split_mode": info["mode"],
+        "train_sessions": info.get("train_sessions"),
+        "test_sessions": info.get("test_sessions"),
         "split_stratified": bool(info["stratified"]),
         "split_stratify_fallback_reason": info["stratify_fallback_reason"],
         "split_missing_classes": info["missing_classes"],
