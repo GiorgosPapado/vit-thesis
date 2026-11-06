@@ -85,9 +85,6 @@ print(device)
 # train_dataset = CustomTensorDataset(train_file_paths)
 # val_dataset = CustomTensorDataset(val_file_paths)
 
-# # Use DataLoader for efficient streaming and batching
-# train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=32, shuffle=True)
-# val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=32, shuffle=False)
 
 
 # %%
