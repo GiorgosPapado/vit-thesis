@@ -12,13 +12,14 @@ Code for my MSc thesis, *Vision Transformer for Gesture Recognition from EMG Sig
                  (tester.py, testexport.py) and notebooks (vitgpt2.ipynb, test_gpt.ipynb)
 02_training/     captioning side work: ViT-GPT2 training (train.py, training_version.ipynb)
 03_experiments/  the EMG thesis experiments
-  folders_creation.ipynb           dataset folder preparation
   code_reproduction_max_samples.ipynb
-  svm_*.ipynb                      SVM baselines
-  vit_google_*.ipynb               fine-tuning google ViT checkpoints
-  vit_train_from_scratch_*.ipynb   ViT trained from scratch
   pca_components_search.ipynb      PCA analysis
   mlflow_plotting.ipynb            result plots from MLflow
+  archive/                         original folders_creation / svm_* / vit_google_* /
+                                   vit_train_from_scratch_* notebooks, superseded by the package
+                                   (see archive/README.md and archive/LEGACY_NOTES.md)
+scripts/prepare_folders.py         builds the per-task dataset folders (port of folders_creation)
+src/emg_gesture/, configs/, tests/ package, configs and tests
 requirements.txt         direct dependencies
 requirements-freeze.txt  full original environment freeze
 ```
@@ -29,7 +30,7 @@ Notebook suffixes mean the experimental split: `5gest` / `10gest` (5 or 10 gestu
 
 ## Package and CLI (`src/emg_gesture`)
 
-Two layouts coexist: the original notebooks in `03_experiments/` (self-contained, unchanged) and the
+Two layouts coexist: the original notebooks in `03_experiments/archive/` (self-contained, unchanged) and the
 reusable package in `src/emg_gesture/` with configs in `configs/` (`base.yaml` < `svm.yaml` < `task/<task>.yaml`).
 Both read the same data layout: one flat folder of `*.mat` per task (e.g. `s1_s2_s3_matfiles_10gest/`), labels parsed
 from filenames (raw ids, `remap_labels` gives 0..K-1 for ViT).
@@ -54,7 +55,9 @@ pip install -r requirements.txt
 ## Reproduce
 
 1. Build the dataset: `01_dataset/` scripts (see comments at the top of each).
-2. Run the notebooks in `03_experiments/` in the order: `folders_creation` > `svm_*` > `vit_google_*` > `vit_train_from_scratch_*` > `mlflow_plotting`.
+2. Create the task folders: `python scripts/prepare_folders.py --source-dir SRC --dest-dir DATA --task all` (try `--dry-run` first; the script docstring lists the original notebook's open quirks).
+3. Run the experiments per task `T` (`10gest 5gest 17participants 10part 5part`): `emg-gesture svm --task T`, then `emg-gesture vit-google --task T`, then `emg-gesture vit-scratch --task T`, each with `--set data_dir=DATA/<task folder>`.
+4. Optional: `03_experiments/mlflow_plotting.ipynb` for plots from tracked runs.
 
 ## Results
 

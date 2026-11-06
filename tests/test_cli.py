@@ -64,14 +64,14 @@ def test_same_seed_reproducible(mat_dir, tmp_path):
 def test_parity_with_svm_10gest_notebook(mat_dir, tmp_path):
     """Script pipeline accuracy == accuracy of the code in the svm_10gest notebook.
 
-    Approach: read ``03_experiments/svm_10gest.ipynb`` (not modified), take its code cells for
+    Approach: read ``03_experiments/archive/svm_10gest.ipynb`` (not modified), take its code cells for
     loading, splitting and the Pipeline/CV/fit (skipping the seeding and plotting cells), and exec
     them on the synthetic fixture. Only the data folder, target_length (10240 -> 40) and PCA size
     (100 -> 5) are textually patched so the tiny fixture works. The notebook's test accuracy
     (pipe.predict on its test split) must equal ``test_accuracy`` from ``emg-gesture svm`` with
     the same seed, split mode, test size and hyper-parameters, and the CV scores must match too.
     """
-    nb_path = ROOT / "03_experiments" / "svm_10gest.ipynb"
+    nb_path = ROOT / "03_experiments" / "archive" / "svm_10gest.ipynb"
     if not nb_path.exists():
         pytest.skip("notebook not available")
     cells = [c for c in json.loads(nb_path.read_text(encoding="utf8"))["cells"] if c["cell_type"] == "code"]
