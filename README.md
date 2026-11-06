@@ -27,14 +27,19 @@ Notebook suffixes mean the experimental split: `5gest` / `10gest` (5 or 10 gestu
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -e '.[torch,dev]'
+pip install -e ".[dev,torch,tracking]"
 ```
 
-Extras: `torch` (torch, transformers; needed for `vit-google` / `vit-scratch`), `tracking` (mlflow), `dev` (pytest, ruff). The SVM baseline needs only the core install.
+Extras: `torch` (torch, transformers; **required** for the `vit-google` / `vit-scratch` commands), `tracking` (mlflow; needed only for MLflow tracking and `mlflow_plotting.ipynb`), `dev` (pytest, ruff). The SVM baseline needs only the core install. Without the `torch` extra the ViT tests are skipped, not run.
 
-Alternatively `pip install -r requirements.txt` installs the thesis-era pinned set (Python 3.10). The original freeze used CUDA 11.8 builds (`+cu118`); for GPU install matching wheels from https://download.pytorch.org/whl/cu118 first.
+**Supported Python and the two install paths**
 
-**Verification caveat:** the tests were run against newer versions than the pins (torch 2.15.0 CPU, transformers 5.22.2, numpy 2.5.4, scikit-learn 1.9.1, matplotlib 3.11.2, PyYAML 6.0.3). The pinned set in `requirements.txt` (torch 2.0.1, transformers 4.30.2, numpy 1.25.1, ...) has NOT been verified here.
+- Path A, reproducible thesis-era set: `pip install -r requirements.txt` (then `pip install -e .`). Targets **Python 3.10 or 3.11**; there are no Python 3.12 wheels for torch 2.0.1 / numpy 1.25.1. The original freeze used CUDA 11.8 builds (`+cu118`); for GPU install matching wheels from https://download.pytorch.org/whl/cu118 first.
+- Path B, newer stack: `pip install -e ".[dev,torch,tracking]"` uses only lower bounds from `pyproject.toml` (`requires-python >=3.10`) and also works on newer Pythons and libraries (tests ran on Python 3.12 with torch 2.15, transformers 5.22).
+
+`pyproject.toml` extras hold lower bounds; `requirements.txt` holds the pinned reproducible set.
+
+**Verification caveat:** the tests were run against newer versions than the pins (torch 2.15.0 CPU, transformers 5.22.2, numpy 2.5.4, scikit-learn 1.9.1, matplotlib 3.11.2, PyYAML 6.0.3). The pinned set in `requirements.txt` (torch 2.0.1, transformers 4.30.2, numpy 1.25.1, ...) has NOT been verified here. In particular, the captioning trainer is verified in tests only against transformers 5; the pinned transformers 4.30.2 is unverified for captioning (the `torch` extra deliberately has no upper cap).
 
 ## Configs and tasks
 
@@ -49,6 +54,8 @@ Tasks (`--task`), with configs in `configs/task/`:
 | `5part` | participant | 5 | forced to `random` (logged) |
 
 Participant-label tasks cannot be split by participant, hence the forced random per-file split (see limitations). Data layout: one flat folder of `*.mat` per task (e.g. `s1_s2_s3_matfiles_10gest/`), labels parsed from filenames.
+
+**10gest data gap:** `scripts/prepare_folders.py --task 10gest` copies per-participant `.dat` files, whereas the CLI reads `.mat` only. The `.dat` to `.mat` conversion happened outside this repo, so `10gest` runs need the `.mat` files produced by the author's conversion step. TODO(author): state where that conversion lives (script/notebook/tool) and add or link it.
 
 ## Run order
 
@@ -119,7 +126,7 @@ MIT, see [LICENSE](LICENSE).
 
 These points come from a code review of the notebooks; they are not experimental results.
 
-**Important: the fixes below were made in the notebook code only. None of the notebooks has been re-run since, and the stored outputs of the edited cells were cleared. Any accuracy numbers published or reported from earlier runs (thesis text, slides, earlier READMEs) used the old, flawed code and are NOT comparable with what the current notebooks will produce. Re-run everything before quoting a number.**
+**Important: the archived notebooks were edited (seed cells, pipeline changes, `SPLIT_MODE`, outputs cleared) and have NOT been re-run; they are not unchanged originals. Any accuracy numbers published or reported from earlier runs (thesis text, slides, earlier READMEs) used the old, flawed code and are NOT comparable with what the current notebooks will produce. Re-run everything before quoting a number.**
 
 Fixed in code (not re-run):
 
