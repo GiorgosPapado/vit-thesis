@@ -1,0 +1,5 @@
+svm:
+  pca_components: 100
+  kernel: linear
+  C: 1.0
+  gamma: scale

@@ -1,0 +1,6 @@
+task: 5gest
+data_dir: s1_s2_s3_matfiles_5gest
+label: gesture
+n_classes: 5
+svm:
+  kernel: rbf   # as in svm_5gest.ipynb

@@ -1,0 +1,4 @@
+task: 10gest
+data_dir: s1_s2_s3_matfiles_10gest
+label: gesture
+n_classes: 10

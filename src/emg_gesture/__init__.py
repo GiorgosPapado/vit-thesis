@@ -6,7 +6,9 @@ from .data import (
     extract_group_from_filename,
     extract_label_from_filename,
     list_mat_files,
+    load_flattened,
     load_sample,
+    remap_labels,
     split_files,
 )
 from .evaluate import report_eval
@@ -19,7 +21,9 @@ __all__ = [
     "extract_group_from_filename",
     "extract_label_from_filename",
     "list_mat_files",
+    "load_flattened",
     "load_sample",
+    "remap_labels",
     "report_eval",
     "seed_worker",
     "set_seed",

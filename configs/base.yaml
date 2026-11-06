@@ -1,0 +1,7 @@
+# Settings shared by all methods and tasks. Merge order: base < method (svm.yaml) < task.
+seed: 42
+split: grouped        # grouped (participant-disjoint) | random (per-file); *part tasks force random
+test_size: 0.33
+cv_splits: 3
+target_length: 10240
+data_dir: null        # set per task (relative to the working directory) or via --set data_dir=...

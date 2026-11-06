@@ -1,0 +1,5 @@
+task: 10part
+data_dir: s1_s2_s3_matfiles_10part
+label: participant
+n_classes: 10
+split: random   # participant label cannot be grouped by participant

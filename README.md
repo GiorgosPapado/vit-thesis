@@ -27,6 +27,21 @@ The `01_dataset/` scripts take `--data-dir` (or the `DATA_DIR` env var) for the 
 
 Notebook suffixes mean the experimental split: `5gest` / `10gest` (5 or 10 gesture classes), `5part` / `10part` / `17participants` (number of participants).
 
+## Package and CLI (`src/emg_gesture`)
+
+Two layouts coexist: the original notebooks in `03_experiments/` (self-contained, unchanged) and the
+reusable package in `src/emg_gesture/` with configs in `configs/` (`base.yaml` < `svm.yaml` < `task/<task>.yaml`).
+Both read the same data layout: one flat folder of `*.mat` per task (e.g. `s1_s2_s3_matfiles_10gest/`), labels parsed
+from filenames (raw ids, `remap_labels` gives 0..K-1 for ViT).
+
+```bash
+pip install -e .[dev]
+emg-gesture svm --task 10gest --split grouped --seed 42 --set data_dir=/path/to/folder --set svm.kernel=rbf
+```
+
+Writes `runs/<task>_svm_<seed>_<timestamp>/` (`config.resolved.yaml`, `metrics.json`, `confusion.png`, `per_class.csv`).
+`*part` / `17participants` tasks use the participant as label, so the split is forced to `random` (logged).
+
 ## Setup
 
 ```bash

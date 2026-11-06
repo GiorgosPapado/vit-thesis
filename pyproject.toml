@@ -7,11 +7,14 @@ name = "emg-gesture"
 version = "0.1.0"
 description = "EMG gesture classification utilities (data loading, splits, evaluation) for the ViT thesis"
 requires-python = ">=3.9"
-dependencies = ["numpy", "scipy", "scikit-learn", "matplotlib"]
+dependencies = ["numpy", "scipy", "scikit-learn", "matplotlib", "pyyaml"]
 
 [project.optional-dependencies]
 torch = ["torch"]
 dev = ["pytest", "ruff"]
+
+[project.scripts]
+emg-gesture = "emg_gesture.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

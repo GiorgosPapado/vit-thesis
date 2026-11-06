@@ -4,6 +4,11 @@ Filename scheme (from the original notebooks): the basename is split on ``_`` an
 token containing ``gesture`` (or ``participant``) gives the label (or group), e.g.
 ``session1_participant7_gesture10_trial1.mat`` -> gesture 10, participant 7.
 .mat files hold the EMG window under the key ``data_emg``, shape (time, channels).
+
+Two layouts coexist: the notebooks use one flat folder of ``*.mat`` per task (e.g.
+``s1_s2_s3_matfiles_10gest/``) with labels parsed from filenames, and so does this package
+(``list_mat_files``); the labels themselves are raw ids (gesture 1..10, participant 1..17), not
+0..K-1 -- use :func:`remap_labels` where a model needs contiguous class indices (ViT).
 """
 
 from __future__ import annotations
@@ -81,6 +86,28 @@ def channel_stats(files, target_length: int, image_shape=None, eps: float = 1e-8
     mean = s / n
     std = np.sqrt(np.maximum(ss / n - mean**2, 0.0))
     return mean, np.where(std < eps, 1.0, std)
+
+
+def load_flattened(filepath: str, target_length: int) -> np.ndarray:
+    """SVM input: the padded/truncated (time, channels) window flattened row-major."""
+    return load_sample(filepath, target_length).T.flatten()
+
+
+def remap_labels(labels, classes=None):
+    """Map arbitrary labels (e.g. gestures 3, 7, 10) to contiguous ints 0..K-1.
+
+    ``classes`` is the sorted array of original labels; computed from ``labels`` when None
+    (pass the result of a first call to map val/test consistently). Returns
+    ``(mapped, classes)``; ``classes[k]`` is the original label of index ``k``.
+    """
+    labels = np.asarray(labels)
+    classes = np.unique(labels) if classes is None else np.asarray(classes)
+    if len(classes) == 0:
+        raise ValueError("no classes")
+    idx = np.clip(np.searchsorted(classes, labels), 0, len(classes) - 1)
+    if not np.array_equal(classes[idx], labels):
+        raise ValueError("labels contain values not in classes")
+    return idx.astype(np.int64), classes
 
 
 def split_files(files, labels=None, mode: str = "grouped", test_size: float = 0.2,
