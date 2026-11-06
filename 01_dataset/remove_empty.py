@@ -1,11 +1,16 @@
-import os 
+import argparse
+import os
+
+_parser = argparse.ArgumentParser()
+_parser.add_argument("--data-dir", default=os.environ.get("DATA_DIR", "/home/vcl3d/coco_dataset_VOX"), help="COCO VOX dataset root (env: DATA_DIR)")
+_args = _parser.parse_args()
 import json 
 from collections import Counter
 
-image_ids = '/home/vcl3d/coco_dataset_VOX/train2014'
-train_text_files_path = '/home/vcl3d/coco_dataset_VOX/train2014_desc'
-val_text_files_path = '/home/vcl3d/coco_dataset_VOX/val2014_desc'
-json_path = '/home/vcl3d/coco_dataset_VOX/annotations_trainval2014/annotations/captions_train2014.json'
+image_ids = os.path.join(_args.data_dir, 'train2014')
+train_text_files_path = os.path.join(_args.data_dir, 'train2014_desc')
+val_text_files_path = os.path.join(_args.data_dir, 'val2014_desc')
+json_path = os.path.join(_args.data_dir, 'annotations_trainval2014/annotations/captions_train2014.json')
 
 def empty_files(path):
     empty_files = []
@@ -56,7 +61,7 @@ def list_items_in_folder(folder_path):
     return items_list
 
 # Replace 'folder_path' with the path to the folder you want to read
-folder_path = '/home/vcl3d/coco_dataset_VOX/train2014'
+folder_path = os.path.join(_args.data_dir, 'train2014')
 items_list = list_items_in_folder(folder_path)
 
 # Print the list of items in the folder

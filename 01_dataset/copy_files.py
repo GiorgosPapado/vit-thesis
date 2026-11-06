@@ -1,7 +1,13 @@
+import argparse
 import os
+
+_parser = argparse.ArgumentParser()
+_parser.add_argument("--data-dir", default=os.environ.get("DATA_DIR", "/home/vcl3d/coco_dataset_VOX"), help="COCO VOX dataset root (env: DATA_DIR)")
+_parser.add_argument("--dest-dir", default=os.environ.get("DEST_DIR", "/home/vcl3d/coco_dataset_VOX_2000"), help="destination root (env: DEST_DIR)")
+_args = _parser.parse_args()
 import shutil
-source_directory = "/home/vcl3d/coco_dataset_VOX/val2014_desc"
-destination_directory = "/home/vcl3d/coco_dataset_VOX_2000/val2014_desc"
+source_directory = os.path.join(_args.data_dir, "val2014_desc")
+destination_directory = os.path.join(_args.dest_dir, "val2014_desc")
 files = os.listdir(source_directory)
 files = sorted(files)
 num_files_to_copy = 5000
