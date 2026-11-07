@@ -85,10 +85,12 @@ The captioning commands are independent (`captioning --help`) and take `--data-d
 The thesis split is cross-session: sessions 1 and 2 train, session 3 tests, the same split for SVM and ViT. Reproduce that split with:
 
 ```bash
-emg-gesture svm --task 10gest --split session --set data_dir=DATA/<task folder>
+emg-gesture svm --task 10gest --split session --set data_dir=DATA/<folder with all three sessions>
 ```
 
-File names need a `session<k>` token (e.g. `session1_participant7_gesture10_trial1.mat`); a file without one raises an error. Config keys `train_sessions` (default `[1, 2]`) and `test_sessions` (default `[3]`) select the sessions; files from other sessions are excluded, and the script asserts that no file is in two splits. `test_size` is ignored. The thesis described no validation set, so for the ViT a validation set is carved out of the TRAIN sessions as a random per-file fraction (`val_size`, stratified when possible, not participant-disjoint); the SVM uses none. `metrics.json` records `split_mode`, `train_sessions` and `test_sessions` (null for the other modes). Participant-label tasks are not forced to random in this mode.
+**Required folder layout:** one flat folder of `.mat` files from sessions 1, 2 and 3, each file name containing a `session<k>` token (`session1_`, `session2_`, `session3_`, e.g. `session2_participant7_gesture10_trial1.mat`), with train and test sessions both present. The output of `scripts/prepare_folders.py` does NOT provide this: for `10gest` it copies only `session1_*` `.dat` files, and for `10part` / `5part` only `session3_*` files, so `--split session` on such a folder raises `ValueError` (no files for the train or test sessions). You must assemble a suitable folder yourself.
+
+File names need a `session<k>` token (e.g. `session1_participant7_gesture10_trial1.mat`); a file without one raises an error. Config keys `train_sessions` (default `[1, 2]`) and `test_sessions` (default `[3]`) select the sessions; files from other sessions are excluded, and the script asserts that no file is in two splits. `test_size` is ignored. The thesis described no validation set, so for the ViT a validation set is carved out of the TRAIN sessions as a random per-file fraction (`val_size`, stratified when possible, not participant-disjoint); the SVM uses none. This random per-file validation split puts sibling repetitions of the same recording in train and validation, so validation accuracy is optimistic and checkpoint selection (best validation accuracy) is weak; a warning is logged and `metrics.json` records `val_split: random_per_file`. Setting `val_sessions` (e.g. `--set val_sessions=[2]`, a proper subset of `train_sessions`) holds out whole sessions for validation instead (`val_split: session_holdout`; `val_size` is then ignored); it is opt-in and untested on real data. `metrics.json` records `split_mode`, `generalises_to_new_subjects`, `train_sessions` and `test_sessions` (null for the other modes). With `--seeds`, `aggregate.json` also records `split_mode`, `generalises_to_new_subjects`, `train_sessions` and `test_sessions`; in session mode the train and test files are fixed, so the std over seeds reflects model initialisation and the validation split only. Participant-label tasks are not forced to random in this mode.
 
 This is the closest match to the thesis protocol but still **not a verified reproduction**: the thesis input pipeline (scalograms, PCA input shape) is not fully specified, and the repo's preprocessing differs (see limitations).
 
@@ -97,7 +99,7 @@ This is the closest match to the thesis protocol but still **not a verified repr
 Each run writes `runs/<task>_<method>_<seed>_<timestamp>/` containing:
 
 - `config.resolved.yaml`: the merged config actually used
-- `metrics.json`: test metrics, split mode (and why it was forced), stratification, per-split class counts, missing classes
+- `metrics.json`: test metrics, split mode (and why it was forced), `generalises_to_new_subjects` (true only for the grouped split), stratification, per-split class counts, missing classes; SVM runs record `svm_hyperparameters` (fixed, no grid search) and `svm_uses_full_window`; ViT runs record `vit_input` (window shape, retained fraction of the window, truncation)
 - `confusion.png`, `per_class.csv`
 - ViT runs only: `history.csv` (per-epoch curves) and `best_model.pth` (best validation checkpoint)
 
@@ -149,7 +151,7 @@ Results of this repository's own code: none yet. TODO: re-run with the current c
 - ViT pre-trained: Google ViT checkpoint (variant not named in the thesis), 50 epochs.
 - ViT from scratch: hidden size 128, 4 heads, 4 layers, 224x224 input, reduced patch count, higher dropout, 500 epochs.
 - Training: AdamW, cross-entropy, 5 warm-up epochs, learning rate 1e-4, batch size 32.
-- Input to the ViT: the EMG rendered as a 224x224 image by averaging channel amplitudes; the exact transform is not described (unclear).
+- Input to the ViT: the thesis describes the EMG as rendered to a 224x224 image by averaging channel amplitudes; the exact transform is not described (unclear). This repository's code does NOT do that: it flattens the (time, channels) window row-major, pads or truncates it to 3*224*224 values and reshapes it to 3x224x224 (see [Known limitations](#known-limitations)).
 - Software and hardware: PyTorch + MLflow, Python 3.10.12, Ubuntu 22.04; Intel i9-10900X, 2x RTX 3090, 64 GB RAM.
 
 ## Data
@@ -203,6 +205,9 @@ Still open:
 - The `*part*` notebooks (and the 5part/10part scratch ones) perform participant identification, not gesture recognition, and cannot be split by participant; they use a random per-file split.
 - In `*gest*` mode `'random'` the numbers are within-subject and do not measure generalisation to new users.
 - Results are single runs by default; use `--seeds 1,2,3` (any command) to run several seeds and get an `aggregate.json` (mean and sample std of test accuracy and macro-F1), and report that rather than one test accuracy.
+- ViT input truncation: `load_sample` flattens the (target_length, channels) window and keeps only the first 3*224*224 = 150528 values. For a window with more values than that, the ViT sees only the leading part in time (that is `150528 / channels` time samples), while the SVM (`load_flattened`) sees the full window. Not an averaging of channels, and not a like-for-like comparison of inputs. A warning is logged, and `metrics.json` records `vit_input` (window shape, `retained_fraction`, `retained_time_samples`, `truncated`) and that the SVM uses the full window. The behaviour itself was not changed.
+- SVM baseline: this package runs a fixed-hyperparameter pipeline (channel standardisation, StandardScaler, PCA, SVC; defaults `kernel: linear`, `C: 1`, `pca_components: 100`, per-task overrides in `configs/`) with no grid search; the thesis SVM (PCA(100) + rbf with GridSearchCV, see above) is therefore not reproduced. `metrics.json` records `svm_hyperparameters: fixed (no grid search)`.
+- Split generalisation: only `grouped` keeps participants disjoint (`generalises_to_new_subjects: true` in `metrics.json` / `aggregate.json`). `random` has no group key, so the same participant and session can be in train and test. `session` trains and tests on the same participants (within-subject, cross-session), so it does not measure generalisation to new users. Its validation split is random per file (see [Cross-session split](#cross-session-split-closest-to-the-thesis-protocol)).
 - ViT "channels" are image planes, not EMG channels: the flattened (time, channels) window is reshaped to 3x224x224 and normalised per plane, so the 3 planes mix time and EMG channels arbitrarily.
 - A single grouped split uses few participants for validation/test, so results depend strongly on which participants land there; a class may be missing from a split (a warning is logged and `metrics.json` records `split_missing_classes` and per-split `class_counts`).
 - Participant-label tasks (`*part*` tasks) are forced to a random per-file split, so train and test contain neighbouring windows of the same sessions; accuracy can be inflated by session adjacency and does not measure generalisation.
