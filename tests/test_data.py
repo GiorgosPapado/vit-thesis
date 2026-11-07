@@ -76,3 +76,15 @@ def test_set_seed_reproducible():
     a = np.random.rand(3)
     set_seed(1)
     assert np.array_equal(a, np.random.rand(3))
+
+
+def test_extract_int_is_strict():
+    from emg_gesture.data import extract_group_from_filename as grp
+    from emg_gesture.data import extract_session_from_filename as sess
+
+    assert sess("/x/session2_participant7_gesture10_trial1.mat") == 2
+    assert extract_label_from_filename("gesture10.mat") == 10
+    assert sess("/x/mysession2_participant7.mat") is None  # substring no longer matches
+    assert sess("/x/session_participant7.mat") is None  # no digits
+    assert grp("/x/session1_participant7x_gesture1.mat") is None
+    assert extract_label_from_filename("/x/session1_gesturefoo_gesture3.mat") == 3

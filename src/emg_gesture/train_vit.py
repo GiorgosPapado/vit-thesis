@@ -365,7 +365,7 @@ def run_vit(cfg: dict, mode: str, out_dir="runs", tracker: Tracker | None = None
             w.writerows(history)
 
         # Single test evaluation, after training, with the validation-selected checkpoint.
-        model.load_state_dict(torch.load(best_path, map_location=device))
+        model.load_state_dict(torch.load(best_path, map_location=device, weights_only=True))
         y_true, y_pred = predict(model, test_loader, device, preprocess)
         res = report_eval(y_true, y_pred, labels=np.arange(n_classes), names=classes,
                           title=f"Test set (ViT {mode}, {task})")

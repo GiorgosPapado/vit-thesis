@@ -16,6 +16,7 @@ from __future__ import annotations
 import glob
 import logging
 import os
+import re
 
 import numpy as np
 import scipy.io as sio
@@ -28,9 +29,12 @@ VIT_IMAGE_SHAPE = (3, 224, 224)
 
 
 def _extract_int(filepath: str, token: str):
+    """Integer after ``token`` in a ``_``-separated name part, matched strictly (``^token<digits>(.ext)?$``)."""
+    pattern = re.compile(rf"^{re.escape(token)}(\d+)(?:\.\w+)?$")
     for part in os.path.basename(filepath).split("_"):
-        if token in part:
-            return int(part.replace(token, "").split(".")[0])
+        m = pattern.match(part)
+        if m:
+            return int(m.group(1))
     return None
 
 
