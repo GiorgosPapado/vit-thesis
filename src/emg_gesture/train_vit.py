@@ -23,6 +23,7 @@ from .data import (
     channel_stats,
     extract_group_from_filename,
     extract_label_from_filename,
+    image_input_report,
     list_mat_files,
     remap_labels,
     split_files_info,
@@ -317,7 +318,7 @@ def run_vit(cfg: dict, mode: str, out_dir="runs", tracker: Tracker | None = None
     train_idx, val_idx, test_idx, split_info = split_files_info(
         files, labels, mode=cfg["split"], test_size=cfg["test_size"], val_size=cfg["val_size"], seed=seed,
         stratify=cfg.get("stratify", True), train_sessions=cfg.get("train_sessions", (1, 2)),
-        test_sessions=cfg.get("test_sessions", (3,)))
+        test_sessions=cfg.get("test_sessions", (3,)), val_sessions=cfg.get("val_sessions"))
     if len(val_idx) == 0 or len(test_idx) == 0:
         raise ValueError("validation or test split is empty; add data or adjust test_size/val_size")
 
@@ -330,6 +331,13 @@ def run_vit(cfg: dict, mode: str, out_dir="runs", tracker: Tracker | None = None
     size = int(model_cfg.get("image_size", 224))
     image_shape = (3, size, size)
     tl = int(cfg["target_length"])
+    vit_input = image_input_report(train_f[0], tl, image_shape)
+    if vit_input["truncated"]:
+        log.warning("ViT input truncation: the %s (time, channels) window has %d values but the image holds %d; "
+                    "only the first %.1f%% (%d of %d time samples) reach the ViT, while the SVM sees the full "
+                    "window.", vit_input["window_shape_time_channels"], vit_input["window_values"],
+                    vit_input["image_values"], 100 * vit_input["retained_fraction"],
+                    vit_input["retained_time_samples"], tl)
     stats = channel_stats(train_f, tl, image_shape)  # per-channel, train files only
 
     def make_ds(f, y):
@@ -374,7 +382,8 @@ def run_vit(cfg: dict, mode: str, out_dir="runs", tracker: Tracker | None = None
             "scheduler": (scheduler_plan(tcfg["scheduler"], int(tcfg["epochs"]), len(train_loader),
                                          float(tcfg["lr"]))["info"] if tcfg.get("scheduler") else None),
             "task": task, "method": method, "split": cfg["split"], "split_forced_reason": forced_reason,
-            **split_report(labels, train_idx, val_idx, test_idx, split_info), "seed": seed, "device": device.type,
+            **split_report(labels, train_idx, val_idx, test_idx, split_info), "vit_input": vit_input,
+            "seed": seed, "device": device.type,
             "n_train": int(len(train_idx)), "n_val": int(len(val_idx)), "n_test": int(len(test_idx)),
             "n_classes": int(n_classes), "epochs": len(history), "best_epoch": best_epoch,
             "best_val_accuracy": history[best_epoch - 1]["val_acc"],

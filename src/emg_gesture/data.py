@@ -77,6 +77,24 @@ def load_sample(filepath: str, target_length: int, image_shape=None) -> np.ndarr
     return flat.reshape(image_shape)
 
 
+def image_input_report(filepath: str, target_length: int, image_shape=VIT_IMAGE_SHAPE) -> dict:
+    """How much of a (target_length, channels) window fits into ``image_shape`` (see :func:`load_sample`).
+
+    ``load_sample`` flattens the window row-major (time-major) and keeps only the first
+    ``prod(image_shape)`` values, so a window longer than that is truncated in time. Computed from the
+    channel count of ``filepath``; ``retained_fraction`` is capped at 1.0.
+    """
+    n_channels = int(sio.loadmat(filepath)[MAT_KEY].shape[1])
+    n_values = target_length * n_channels
+    capacity = int(np.prod(image_shape))
+    kept_time = min(target_length, capacity // n_channels)
+    return {"window_shape_time_channels": [int(target_length), n_channels], "image_shape": list(image_shape),
+            "window_values": int(n_values), "image_values": capacity,
+            "retained_fraction": float(min(1.0, capacity / n_values)), "retained_time_samples": int(kept_time),
+            "truncated": bool(n_values > capacity), "padded": bool(n_values < capacity),
+            "svm_uses_full_window": True}
+
+
 def channel_stats(files, target_length: int, image_shape=None, eps: float = 1e-8):
     """Per-channel mean/std (axis 0 of ``load_sample`` output). Use TRAIN files only.
 
@@ -132,11 +150,16 @@ def _stratified_random(idx, labels, test_size, val_size, seed):
     return train, val, test
 
 
-def _session_split(files, y, val_size, seed, train_sessions, test_sessions, info):
+def _session_split(files, y, val_size, seed, train_sessions, test_sessions, info, val_sessions=None):
     """Cross-session split (thesis protocol): train on ``train_sessions``, test on ``test_sessions``.
 
     Validation is a random per-file fraction (``val_size``) of the TRAIN-session files; the thesis
     described no validation set, so this is our choice. Files from other sessions are excluded.
+
+    The random per-file validation split puts sibling repetitions of the same recording session in train and
+    validation, so validation accuracy is optimistic and checkpoint selection is weak (a warning is logged).
+    ``val_sessions`` (a non-empty proper subset of ``train_sessions``) instead holds out whole sessions for
+    validation, ignoring ``val_size``.
     """
     train_sessions = sorted({int(k) for k in train_sessions})
     test_sessions = sorted({int(k) for k in test_sessions})
@@ -154,7 +177,22 @@ def _session_split(files, y, val_size, seed, train_sessions, test_sessions, info
     if len(trainval) == 0 or len(test) == 0:
         raise ValueError(f"session split: no files for train sessions {train_sessions} or test sessions "
                          f"{test_sessions} (found sessions {sorted(set(sess.tolist()))})")
-    if val_size > 0:
+    info["val_split"] = "none"
+    if val_sessions:
+        val_sessions = sorted({int(k) for k in val_sessions})
+        if not set(val_sessions) < set(train_sessions):
+            raise ValueError("val_sessions must be a non-empty proper subset of train_sessions")
+        is_val = np.isin(sess[trainval], val_sessions)
+        train, val = trainval[~is_val], trainval[is_val]
+        if len(train) == 0 or len(val) == 0:
+            raise ValueError(f"session split: no files for train/validation after holding out {val_sessions}")
+        info["val_split"], info["val_sessions"] = "session_holdout", val_sessions
+    elif val_size > 0:
+        info["val_split"] = "random_per_file"
+        log.warning("Session split: validation is a random per-file fraction of sessions %s, so sibling "
+                    "repetitions are in both train and validation; validation accuracy is optimistic and "
+                    "checkpoint selection is weak. Set val_sessions to hold out a whole session instead.",
+                    train_sessions)
         strat = None
         if y is not None:
             _, counts = np.unique(y[trainval], return_counts=True)
@@ -182,7 +220,7 @@ def _session_split(files, y, val_size, seed, train_sessions, test_sessions, info
 
 def split_files_info(files, labels=None, mode: str = "grouped", test_size: float = 0.2,
                      val_size: float = 0.2, seed: int = 42, stratify=None,
-                     train_sessions=(1, 2), test_sessions=(3,)):
+                     train_sessions=(1, 2), test_sessions=(3,), val_sessions=None):
     """Split into (train, val, test) index arrays plus an info dict.
 
     mode 'random': per-file train_test_split, stratified by label unless ``stratify`` is False
@@ -202,9 +240,10 @@ def split_files_info(files, labels=None, mode: str = "grouped", test_size: float
     idx = np.arange(len(files))
     y = None if labels is None else np.asarray(labels)
     info = {"mode": mode, "stratified": False, "stratify_fallback_reason": None, "missing_classes": {},
-            "train_sessions": None, "test_sessions": None}
+            "train_sessions": None, "test_sessions": None, "val_split": None, "val_sessions": None}
     if mode == "session":
-        return (*_session_split(files, y, val_size, seed, train_sessions, test_sessions, info), info)
+        return (*_session_split(files, y, val_size, seed, train_sessions, test_sessions, info,
+                                              val_sessions), info)
     if mode == "random":
         out = None
         if stratify is not False:
@@ -262,10 +301,10 @@ def split_files_info(files, labels=None, mode: str = "grouped", test_size: float
 
 def split_files(files, labels=None, mode: str = "grouped", test_size: float = 0.2,
                 val_size: float = 0.2, seed: int = 42, stratify=None,
-                train_sessions=(1, 2), test_sessions=(3,)):
+                train_sessions=(1, 2), test_sessions=(3,), val_sessions=None):
     """:func:`split_files_info` without the info dict: returns (train, val, test) index arrays."""
     return split_files_info(files, labels, mode, test_size, val_size, seed, stratify,
-                            train_sessions, test_sessions)[:3]
+                            train_sessions, test_sessions, val_sessions)[:3]
 
 
 def split_report(labels, train, val, test, info: dict) -> dict:
@@ -278,6 +317,11 @@ def split_report(labels, train, val, test, info: dict) -> dict:
 
     return {
         "split_mode": info["mode"],
+        # Only the grouped split keeps participants disjoint; random has no group key and the session split
+        # reuses the same participants in train and test (within-subject, cross-session).
+        "generalises_to_new_subjects": info["mode"] == "grouped",
+        "val_split": info.get("val_split"),
+        "val_sessions": info.get("val_sessions"),
         "train_sessions": info.get("train_sessions"),
         "test_sessions": info.get("test_sessions"),
         "split_stratified": bool(info["stratified"]),

@@ -33,13 +33,20 @@ TASKS = ("10gest", "5gest", "17participants", "10part", "5part")
 
 def aggregate_runs(run_dirs, out_dir, task, method, seeds) -> Path:
     """Write ``aggregate.json`` (mean/std of test accuracy and macro-F1 over per-seed runs) to a new dir."""
-    per_seed = []
+    per_seed, first = [], None
     for seed, rd in zip(seeds, run_dirs):
         m = json.loads((Path(rd) / "metrics.json").read_text(encoding="utf8"))
+        first = first or m
         per_seed.append({"seed": seed, "run_dir": Path(rd).name, "test_accuracy": m["test_accuracy"],
                          "macro_f1": m["macro_f1"]})
     agg = {"task": task, "method": method, "seeds": list(seeds), "n_runs": len(per_seed), "per_seed": per_seed,
            "std_ddof": 1 if len(per_seed) > 1 else 0}
+    if first is not None:  # identical across seeds: same config, only the seed differs
+        for key in ("split_mode", "generalises_to_new_subjects", "train_sessions", "test_sessions"):
+            agg[key] = first.get(key)
+        if agg["split_mode"] == "session":
+            agg["std_note"] = ("session mode: train/test files are fixed, so the std over seeds reflects "
+                               "model initialisation and the validation split only, not data sampling")
     for key in ("test_accuracy", "macro_f1"):
         v = np.array([r[key] for r in per_seed], dtype=float)
         agg[key] = {"mean": float(v.mean()), "std": float(v.std(ddof=1)) if len(v) > 1 else 0.0}
@@ -81,7 +88,7 @@ def run_svm(cfg: dict, out_dir="runs") -> Path:
     train_idx, val_idx, test_idx, split_info = split_files_info(
         files, labels, mode=cfg["split"], test_size=cfg["test_size"], val_size=0.0, seed=seed,
         stratify=cfg.get("stratify", True), train_sessions=cfg.get("train_sessions", (1, 2)),
-        test_sessions=cfg.get("test_sessions", (3,)))
+        test_sessions=cfg.get("test_sessions", (3,)), val_sessions=None)
     X_train = np.array([load_flattened(files[i], cfg["target_length"]) for i in train_idx])
     X_test = np.array([load_flattened(files[i], cfg["target_length"]) for i in test_idx])
     y_train, y_test = labels[train_idx], labels[test_idx]
@@ -112,6 +119,9 @@ def run_svm(cfg: dict, out_dir="runs") -> Path:
         "n_train": int(len(train_idx)),
         "n_test": int(len(test_idx)),
         "n_classes_seen": int(len(classes)),
+        "svm_uses_full_window": True,  # unlike the ViT input, which is truncated to 3x224x224 values
+        "svm_hyperparameters": "fixed (no grid search)",
+        "svm_config": dict(cfg["svm"]),
         "test_accuracy": res["accuracy"],
         "macro_f1": res["macro_f1"],
         "chance_uniform": res["chance_uniform"],
