@@ -3,3 +3,8 @@ svm:
   kernel: linear
   C: 1.0
   gamma: scale
+  grid_search: false  # opt-in: tune over `grid` with GridSearchCV on the training files only
+  grid:
+    C: [0.1, 1, 10, 100]
+    kernel: [linear, rbf]
+    gamma: [scale, auto]

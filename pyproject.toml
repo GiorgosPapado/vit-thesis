@@ -11,12 +11,12 @@ dependencies = ["numpy", "scipy", "scikit-learn", "matplotlib", "pyyaml"]
 
 [project.optional-dependencies]
 torch = ["torch", "transformers"]
+convert = ["wfdb"]
 tracking = ["mlflow"]
 dev = ["pytest", "ruff"]
 
 [project.scripts]
 emg-gesture = "emg_gesture.cli:main"
-captioning = "captioning.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -28,7 +28,7 @@ pythonpath = ["src", "tests"]
 [tool.ruff]
 line-length = 120
 src = ["src", "tests"]
-extend-exclude = ["*/archive", "*.ipynb", "01_dataset/tester.py"]
+extend-exclude = ["*.ipynb"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]

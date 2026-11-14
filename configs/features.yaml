@@ -1,0 +1,8 @@
+features:
+  features: [rms, mav, wl, zc, ssc, var]
+  classifier: lda  # lda | rf | svm
+  rf:
+    n_estimators: 200
+  svm:
+    C: 1.0
+    kernel: rbf

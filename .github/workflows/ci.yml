@@ -18,15 +18,15 @@ jobs:
         run: pytest -q
   test-torch:
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.10"
+          cache: pip
       - name: Install (CPU torch extra)
-        run: |
-          pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install -e '.[dev,torch]'
-      - name: Pytest (ViT tests run)
-        run: pytest -q
+        run: pip install -e '.[dev,torch,convert]' --extra-index-url https://download.pytorch.org/whl/cpu
+      - name: Pytest (ViT tests run; any skip fails)
+        env:
+          REQUIRE_TORCH: "1"
+        run: pytest -q -rs

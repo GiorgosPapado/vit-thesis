@@ -22,6 +22,7 @@ from .data import (
     split_report,
 )
 from .evaluate import report_eval
+from .features import features_pipeline
 from .models import svm_pipeline
 from .runs import load_config, resolve_split, unique_run_dir
 from .seed import set_seed
@@ -58,13 +59,91 @@ def aggregate_runs(run_dirs, out_dir, task, method, seeds) -> Path:
     return path
 
 
+def _listify_grid(grid_cfg: dict) -> dict:
+    """Wrap scalar grid values (e.g. ``--set svm.grid.C=1``) into one-element lists."""
+    return {k: list(v) if isinstance(v, (list, tuple)) else [v] for k, v in grid_cfg.items()}
+
+
+def _svm_param_grid(grid_cfg: dict) -> list:
+    """Config grid -> list of param dicts; the linear kernel gets no ``gamma`` (it is ignored there)."""
+    grid_cfg = _listify_grid(grid_cfg)
+    base = {k: v for k, v in grid_cfg.items() if k not in ("kernel", "gamma")}
+    out = []
+    for kern in grid_cfg.get("kernel", ["linear"]):
+        d = {**base, "kernel": [kern]}
+        if kern != "linear" and "gamma" in grid_cfg:
+            d["gamma"] = grid_cfg["gamma"]
+        out.append({f"svc__{k}": v for k, v in d.items()})
+    return out
+
+
+def _svm_fit_eval(cfg, pipe, X_train, y_train, X_test, cv, cv_groups):
+    """Fit the SVM pipeline (optionally grid search); return predictions, CV scores, metrics fields."""
+    from sklearn.model_selection import GridSearchCV, cross_val_score
+
+    grid_search = bool(cfg["svm"].get("grid_search", False))
+    hyper = "fixed (no grid search)"
+    extra = {}
+    if grid_search:
+        grid = _svm_param_grid(cfg["svm"]["grid"])  # pca_components stays fixed
+        gs = GridSearchCV(pipe, grid, cv=cv, scoring="accuracy", refit=True)
+        gs.fit(X_train, y_train, groups=cv_groups)  # train files only; test set untouched until predict
+        cv_scores = None  # selection-biased per-fold scores are not emitted as cv_scores/cv_mean
+        hyper = "grid_search"
+        extra = {"best_params": {k.removeprefix("svc__"): v for k, v in gs.best_params_.items()},
+                 "grid": _listify_grid(cfg["svm"]["grid"]),
+                 "best_cv_score": float(gs.best_score_), "cv_is_selection_biased": True}
+        y_pred = gs.best_estimator_.predict(X_test)
+    else:
+        cv_scores = cross_val_score(pipe, X_train, y_train, cv=cv, groups=cv_groups, scoring="accuracy")
+        pipe.fit(X_train, y_train)  # test set untouched until here
+        y_pred = pipe.predict(X_test)
+    # grid runs: kernel/C/gamma are tuned, so record only the fixed PCA size and the grid (best_params: rest)
+    svm_config = dict(cfg["svm"])
+    if grid_search:
+        svm_config = {"pca_components": svm_config["pca_components"], "grid": extra["grid"]}
+    fields = {
+        "svm_uses_full_window": True,  # unlike the ViT input, which is truncated to 3x224x224 values
+        "svm_hyperparameters": hyper,
+        **extra,
+        "svm_config": svm_config,
+    }
+    return y_pred, cv_scores, fields
+
+
+def _features_fit_eval(cfg, pipe, X_train, y_train, X_test, cv, cv_groups):
+    from sklearn.model_selection import cross_val_score
+
+    cv_scores = cross_val_score(pipe, X_train, y_train, cv=cv, groups=cv_groups, scoring="accuracy")
+    pipe.fit(X_train, y_train)  # test set untouched until here
+    y_pred = pipe.predict(X_test)
+    fcfg = cfg["features"]
+    clf = fcfg.get("classifier", "lda")
+    fields = {
+        "feature_names": list(fcfg["features"]),
+        "classifier": clf,
+        "classifier_params": dict(fcfg[clf]) if isinstance(fcfg.get(clf), dict) else {},
+    }
+    return y_pred, cv_scores, fields
+
+
 def run_svm(cfg: dict, out_dir="runs") -> Path:
     """Run the SVM baseline for a resolved config and write the run directory."""
+    return _run_sklearn(cfg, out_dir, "svm", svm_pipeline, _svm_fit_eval, "SVM")
+
+
+def run_features(cfg: dict, out_dir="runs") -> Path:
+    """Run the handcrafted-feature baseline for a resolved config and write the run directory."""
+    return _run_sklearn(cfg, out_dir, "features", features_pipeline, _features_fit_eval, "features")
+
+
+def _run_sklearn(cfg, out_dir, method, build_pipeline, fit_eval, title_name) -> Path:
+    """Shared sklearn run: load, split, CV, test eval and artifacts (config, metrics, confusion, per-class)."""
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    from sklearn.model_selection import GroupKFold, StratifiedKFold, cross_val_score
+    from sklearn.model_selection import GroupKFold, StratifiedKFold
 
     cfg = copy.deepcopy(cfg)
     seed = int(cfg["seed"])
@@ -94,20 +173,18 @@ def run_svm(cfg: dict, out_dir="runs") -> Path:
     y_train, y_test = labels[train_idx], labels[test_idx]
     n_channels = X_train.shape[1] // cfg["target_length"]
 
-    pipe = svm_pipeline(cfg, n_channels)
+    pipe = build_pipeline(cfg, n_channels)
     if cfg["split"] == "grouped":
         cv_groups = np.array([extract_group_from_filename(files[i]) for i in train_idx], dtype=object)
         cv = GroupKFold(n_splits=cfg["cv_splits"])
     else:
         cv_groups = None
         cv = StratifiedKFold(n_splits=cfg["cv_splits"], shuffle=True, random_state=seed)
-    cv_scores = cross_val_score(pipe, X_train, y_train, cv=cv, groups=cv_groups, scoring="accuracy")
-    pipe.fit(X_train, y_train)  # test set untouched until here
-    y_pred = pipe.predict(X_test)
+    y_pred, cv_scores, fields = fit_eval(cfg, pipe, X_train, y_train, X_test, cv, cv_groups)
     classes = np.unique(np.concatenate([y_train, y_test]))
-    res = report_eval(y_test, y_pred, labels=classes, title=f"Test set (SVM, {task})")
+    res = report_eval(y_test, y_pred, labels=classes, title=f"Test set ({title_name}, {task})")
 
-    run_dir = unique_run_dir(out_dir, task, "svm", seed)
+    run_dir = unique_run_dir(out_dir, task, method, seed)
     with open(run_dir / "config.resolved.yaml", "w", encoding="utf8") as f:
         yaml.safe_dump(cfg, f, sort_keys=False)
     metrics = {
@@ -119,16 +196,16 @@ def run_svm(cfg: dict, out_dir="runs") -> Path:
         "n_train": int(len(train_idx)),
         "n_test": int(len(test_idx)),
         "n_classes_seen": int(len(classes)),
-        "svm_uses_full_window": True,  # unlike the ViT input, which is truncated to 3x224x224 values
-        "svm_hyperparameters": "fixed (no grid search)",
-        "svm_config": dict(cfg["svm"]),
+        **fields,
         "test_accuracy": res["accuracy"],
         "macro_f1": res["macro_f1"],
         "chance_uniform": res["chance_uniform"],
         "chance_majority": res["chance_majority"],
-        "cv_scores": [float(s) for s in cv_scores],
-        "cv_mean": float(np.mean(cv_scores)),
     }
+    if cv_scores is not None:
+        metrics["cv_scores"] = [float(s) for s in cv_scores]
+        metrics["cv_mean"] = float(np.mean(cv_scores))
+        metrics["cv_is_selection_biased"] = False
     with open(run_dir / "metrics.json", "w", encoding="utf8") as f:
         json.dump(metrics, f, indent=2)
     res["fig"].savefig(run_dir / "confusion.png", dpi=120)
@@ -158,6 +235,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="emg-gesture", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     for name, helptext in (("svm", "train/evaluate the SVM baseline"),
+                           ("features", "handcrafted time-domain features + LDA/RF/SVM baseline"),
                            ("vit-google", "fine-tune the pretrained Google ViT"),
                            ("vit-scratch", "train a small ViT from scratch")):
         _add_common_options(sub.add_parser(name, help=helptext))
@@ -188,6 +266,9 @@ def main(argv=None) -> int:
     if args.command == "svm":
         def runner(c):
             return run_svm(c, args.out_dir)
+    elif args.command == "features":
+        def runner(c):
+            return run_features(c, args.out_dir)
     else:
         from .train_vit import run_vit
 

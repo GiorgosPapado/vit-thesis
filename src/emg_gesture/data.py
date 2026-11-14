@@ -26,6 +26,45 @@ log = logging.getLogger("emg_gesture")
 
 MAT_KEY = "data_emg"
 VIT_IMAGE_SHAPE = (3, 224, 224)
+INPUT_REPRS = ("flatten", "spectrogram")
+DEFAULT_SPECTROGRAM = {"nperseg": 32, "noverlap": None, "log": True}
+
+
+def _resize_bilinear(a: np.ndarray, out_h: int, out_w: int) -> np.ndarray:
+    """Deterministic separable linear resize of a 2-D map to (out_h, out_w) (numpy only)."""
+    h, w = a.shape
+    xs = np.linspace(0, w - 1, out_w)
+    a = np.stack([np.interp(xs, np.arange(w), row) for row in a])
+    ys = np.linspace(0, h - 1, out_h)
+    return np.stack([np.interp(ys, np.arange(h), col) for col in a.T], axis=1)
+
+
+def _stft_params(p: dict, n_time: int) -> tuple[int, int]:
+    """Effective (nperseg, noverlap) for a window of ``n_time`` samples."""
+    nperseg = max(2, min(int(p["nperseg"]), int(n_time)))
+    noverlap = nperseg // 2 if p.get("noverlap") is None else int(p["noverlap"])
+    return nperseg, min(max(noverlap, 0), nperseg - 1)
+
+
+def spectrogram_image(data: np.ndarray, size: int, params=None) -> np.ndarray:
+    """(time, channels) window -> (3, size, size) image from the FULL window (no time truncation).
+
+    Per channel: ``scipy.signal.stft`` magnitude (log1p if ``log``), resized to (size, size); the channel
+    maps are averaged over 3 contiguous channel groups (``np.array_split``). Deterministic.
+    """
+    from scipy.signal import stft
+
+    p = {**DEFAULT_SPECTROGRAM, **(params or {})}
+    n_time, n_ch = data.shape
+    nperseg, noverlap = _stft_params(p, n_time)
+    _, _, z = stft(data.astype(np.float64), nperseg=nperseg, noverlap=noverlap, axis=0, boundary="zeros",
+                   padded=True)  # (freq, channels, frames)
+    mag = np.abs(z)
+    if p.get("log", True):
+        mag = np.log1p(mag)
+    maps = np.stack([_resize_bilinear(mag[:, c, :], size, size) for c in range(n_ch)])
+    groups = np.array_split(np.arange(n_ch), 3)
+    return np.stack([maps[g].mean(axis=0) if len(g) else np.zeros((size, size)) for g in groups])
 
 
 def _extract_int(filepath: str, token: str):
@@ -58,7 +97,8 @@ def list_mat_files(root: str) -> list:
     return sorted(glob.glob(os.path.join(root, "*.mat")))
 
 
-def load_sample(filepath: str, target_length: int, image_shape=None) -> np.ndarray:
+def load_sample(filepath: str, target_length: int, image_shape=None, input_repr: str = "flatten",
+                spectrogram=None) -> np.ndarray:
     """Load one file, zero NaN/inf, pad/truncate time to ``target_length``.
 
     Returns (channels, time). If ``image_shape`` (e.g. VIT_IMAGE_SHAPE) is given, the
@@ -71,13 +111,18 @@ def load_sample(filepath: str, target_length: int, image_shape=None) -> np.ndarr
         data = data[:target_length]
     if image_shape is None:
         return data.T
+    if input_repr == "spectrogram":
+        return spectrogram_image(data, int(image_shape[-1]), spectrogram)
+    if input_repr != "flatten":
+        raise ValueError(f"input_repr must be one of {INPUT_REPRS}")
     flat = data.flatten()
     n = int(np.prod(image_shape))
     flat = np.pad(flat, (0, n - flat.size)) if flat.size < n else flat[:n]
     return flat.reshape(image_shape)
 
 
-def image_input_report(filepath: str, target_length: int, image_shape=VIT_IMAGE_SHAPE) -> dict:
+def image_input_report(filepath: str, target_length: int, image_shape=VIT_IMAGE_SHAPE,
+                       input_repr: str = "flatten", spectrogram=None) -> dict:
     """How much of a (target_length, channels) window fits into ``image_shape`` (see :func:`load_sample`).
 
     ``load_sample`` flattens the window row-major (time-major) and keeps only the first
@@ -86,16 +131,27 @@ def image_input_report(filepath: str, target_length: int, image_shape=VIT_IMAGE_
     """
     n_channels = int(sio.loadmat(filepath)[MAT_KEY].shape[1])
     n_values = target_length * n_channels
+    if input_repr == "spectrogram":
+        sp = {**DEFAULT_SPECTROGRAM, **(spectrogram or {})}
+        nperseg, noverlap = _stft_params(sp, target_length)
+        return {"input_repr": "spectrogram", "window_shape_time_channels": [int(target_length), n_channels],
+                "image_shape": list(image_shape), "window_values": int(n_values),
+                "image_values": int(np.prod(image_shape)), "retained_fraction": None,
+                "time_covered": 1.0, "truncated": False, "padded": False,
+                "nperseg": nperseg, "noverlap": noverlap, "n_frequency_bins": nperseg // 2 + 1,
+                "channel_grouping": "3 contiguous channel groups averaged (channel identity not preserved)",
+                "spectrogram": sp, "svm_uses_full_window": True}
     capacity = int(np.prod(image_shape))
     kept_time = min(target_length, capacity // n_channels)
-    return {"window_shape_time_channels": [int(target_length), n_channels], "image_shape": list(image_shape),
-            "window_values": int(n_values), "image_values": capacity,
+    return {"input_repr": "flatten", "window_shape_time_channels": [int(target_length), n_channels],
+            "image_shape": list(image_shape), "window_values": int(n_values), "image_values": capacity,
             "retained_fraction": float(min(1.0, capacity / n_values)), "retained_time_samples": int(kept_time),
             "truncated": bool(n_values > capacity), "padded": bool(n_values < capacity),
             "svm_uses_full_window": True}
 
 
-def channel_stats(files, target_length: int, image_shape=None, eps: float = 1e-8):
+def channel_stats(files, target_length: int, image_shape=None, eps: float = 1e-8, input_repr: str = "flatten",
+                  spectrogram=None):
     """Per-channel mean/std (axis 0 of ``load_sample`` output). Use TRAIN files only.
 
     Channels with std < eps get std 1 (zero-std guard).
@@ -103,7 +159,7 @@ def channel_stats(files, target_length: int, image_shape=None, eps: float = 1e-8
     n = 0
     s = ss = None
     for f in files:
-        x = load_sample(f, target_length, image_shape).astype(np.float64)
+        x = load_sample(f, target_length, image_shape, input_repr, spectrogram).astype(np.float64)
         x = x.reshape(x.shape[0], -1)
         if s is None:
             s = np.zeros(x.shape[0])
@@ -337,7 +393,8 @@ class EMGDataset:
     ``norm_stats`` = (mean, std) from :func:`channel_stats` on the training files.
     """
 
-    def __init__(self, files, labels, target_length: int, norm_stats=None, image_shape=None):
+    def __init__(self, files, labels, target_length: int, norm_stats=None, image_shape=None,
+                 input_repr: str = "flatten", spectrogram=None):
         if len(files) != len(labels):
             raise ValueError("files and labels differ in length")
         self.files = list(files)
@@ -345,12 +402,13 @@ class EMGDataset:
         self.target_length = target_length
         self.norm_stats = norm_stats
         self.image_shape = image_shape
+        self.input_repr, self.spectrogram = input_repr, spectrogram
 
     def __len__(self) -> int:
         return len(self.files)
 
     def __getitem__(self, idx):
-        x = load_sample(self.files[idx], self.target_length, self.image_shape)
+        x = load_sample(self.files[idx], self.target_length, self.image_shape, self.input_repr, self.spectrogram)
         if self.norm_stats is not None:
             mean, std = self.norm_stats
             shape = (-1,) + (1,) * (x.ndim - 1)

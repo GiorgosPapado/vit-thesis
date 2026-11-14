@@ -23,16 +23,18 @@ def src(tmp_path):
     root = tmp_path / "src"
     for pid in (1, 2, 11, 18):
         for g in (1, 3, 5, 8, 16):
-            _touch(root / f"session1_participant{pid}" / f"session1_participant{pid}_gesture{g}_trial1.dat")
+            _touch(root / f"session1_participant{pid}_gesture{g}_trial1.mat")
+            _touch(root / f"session2_participant{pid}_gesture{g}_trial1.mat")
             _touch(root / f"session3_participant{pid}_gesture{g}_trial1.mat")
     (root / "session3_participant99_dir").mkdir()
     return root
 
 
-def test_10gest_dat_per_participant(src):
+def test_10gest_flat_mat_all_sessions(src):
     files = pf.select_files(src, "10gest")
-    assert len(files) == 4 * 4  # gestures 1,5,8,16 are in the set; 3 is not
-    assert all(f.suffix == ".dat" for f in files)
+    assert len(files) == 3 * 4 * 4  # sessions 1-3 x participants x gestures 1,5,8,16 (3 is not in the set)
+    assert all(f.suffix == ".mat" for f in files)
+    assert {f.name.split("_")[0] for f in files} == {"session1", "session2", "session3"}
 
 
 def test_5gest_flat_mat(src):
@@ -63,7 +65,7 @@ def test_copy_not_move_and_refuse_nonempty(src, tmp_path):
     args = ["--source-dir", str(src), "--dest-dir", str(dest), "--task", "5gest"]
     assert pf.main(args) == 0
     out = dest / "s1_s2_s3_matfiles_5gest"
-    assert len(list(out.iterdir())) == 12
+    assert len(list(out.iterdir())) == 4 * 3 * 3
     assert (src / "session3_participant1_gesture5_trial1.mat").exists()
     assert pf.main(args) == 1
     assert pf.main([*args, "--force"]) == 0

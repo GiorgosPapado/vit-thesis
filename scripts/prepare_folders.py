@@ -1,44 +1,32 @@
-"""Build the per-task dataset folders (port of ``03_experiments/archive/folders_creation.ipynb``).
+"""Build the per-task dataset folders.
 
-Files are COPIED (never moved) from a GrabMyo-style source tree into
-``<dest-dir>/<task folder>``. The selection logic follows the notebook cell for each task:
+Files are COPIED (never moved) from a flat folder of ``.mat`` files (the output of
+``scripts/convert_dat_to_mat.py --flatten``) into ``<dest-dir>/<task folder>``:
 
 ==============  ==========================================================  =======================
-task            selection (notebook cell)                                   dest sub-folder
+task            selection (flat ``<src>/*.mat``)                            dest sub-folder
 ==============  ==========================================================  =======================
-10gest          cell 7: ``<src>/session1_participant*/*.dat``, gestures     s1_s2_s3_matfiles_10gest
-                {1,2,5,8,9,10,11,12,14,16}, all participants
-5gest           cell 9: ``<src>/*.mat`` (flat), gestures {5,8,10,11,16}     s1_s2_s3_matfiles_5gest
-17participants   cell 10: ``<src>/*.mat`` (flat), the 10-gesture set above,  17participants
-                participant id <= 17
-10part          cell 6: ``<src>/session3_participant*`` (flat), participant s1_s2_s3_matfiles_10part
-                id 1..10, all gestures
-5part           no active cell (see quirks): cell 6 logic with id 1..5      s1_s2_s3_matfiles_5part
+10gest          gestures {1,2,5,8,9,10,11,12,14,16}, all sessions and       s1_s2_s3_matfiles_10gest
+                participants
+5gest           gestures {5,8,10,11,16}                                     s1_s2_s3_matfiles_5gest
+17participants  the 10-gesture set above, participant id <= 17              17participants
+10part          ``session3_participant*.mat``, participant id 1..10,        s1_s2_s3_matfiles_10part
+                all gestures
+5part           ``session3_participant*.mat``, participant id 1..5,         s1_s2_s3_matfiles_5part
+                all gestures
 ==============  ==========================================================  =======================
 
-Open quirks of the notebook, kept on purpose (selection is NOT silently "fixed"):
+Rules and quirks, kept on purpose (selection is NOT silently "fixed"):
 
-* 10gest reads ``.dat`` files from per-participant folders while the other tasks read flat ``.mat``
-  files; the ``emg-gesture`` CLI only reads ``*.mat``, so the notebook's ``dataset_10gest`` output
-  is not directly what ``--task 10gest`` expects. The original ``s1_s2_s3_matfiles_10gest`` folder
-  (all sessions, ``.mat``) is not produced by any notebook cell. Point ``--source-dir`` at a tree
-  of ``session1_participant*`` folders holding the files you want.
-* 5part has no cell of its own; the only trace is a commented-out ``participant_id <= 5`` line in
-  cells 9 and 10. It is implemented as the 10part cell with ids 1..5 (an inference).
-* The notebook's other cells (0-5, 8) are not reproduced: cell 0 does ``sorted(<path string>)`` and so
-  iterates over characters (copies nothing useful); cell 5 filters gestures 1..5 on flat files
-  (folder ``VIT_5gestures_20participants``); cells 1-4 and 8 are older Session1/Session3 ``.dat``
-  variants with gestures 1..10 / all / 1..5+7..16 (folders ``10gestures_20participants``,
-  ``allgestures_10participants``, ``allgestures_20participants``, ``complete_dataset``).
-* In 17participants a ``.mat`` whose name has no ``participant<id>`` token and a selected gesture makes
-  the notebook crash with ``TypeError`` (``None <= 17``); here it raises ``ValueError``.
-* 10part/5part: the notebook calls ``shutil.copy`` on every match of ``session3_participant*``; here
-  directories are skipped. Ids are parsed from the ``_``-separated filename token containing
-  ``gesture`` / ``participant`` (a non-numeric remainder raises ``ValueError``, as ``int()`` did).
-* Only one session prefix is hard-wired per task (``session1_`` for 10gest, ``session3_`` for
-  10part/5part), exactly as in the notebook; flat tasks 5gest/17participants accept any ``*.mat``.
-* The notebook's 5gest/17participants gesture test is not guarded against files without a gesture
-  token (they are simply not selected); the same here.
+* All tasks read the flat ``.mat`` files of ``--source-dir`` (no per-participant sub-folders, no ``.dat``).
+  10gest keeps every session (the ``--split session`` layout needs sessions 1, 2 and 3).
+* 5part has no counterpart in the original thesis code; it is the 10part rule with ids 1..5 (an inference).
+* 17participants: a ``.mat`` whose name has no ``participant<id>`` token and a selected gesture raises
+  ``ValueError``.
+* 10part/5part only use ``session3_`` files, so ``--split session`` cannot work on their folders.
+* Ids are parsed from the ``_``-separated filename token containing ``gesture`` / ``participant``
+  (a non-numeric remainder raises ``ValueError``). Files without a gesture token are not selected by
+  the gesture-filtered tasks. Directories are skipped.
 """
 from __future__ import annotations
 
@@ -56,18 +44,17 @@ GESTURES_5 = frozenset({5, 8, 10, 11, 16})
 @dataclass(frozen=True)
 class TaskSpec:
     folder: str
-    pattern: str  # glob relative to the source dir (flat) or to each participant dir
-    participant_dirs: str | None = None  # glob of participant folders, or None for a flat source
+    pattern: str  # glob relative to the (flat) source dir
     gestures: frozenset[int] | None = None
     max_participant: int | None = None
 
 
 TASKS: dict[str, TaskSpec] = {
-    "10gest": TaskSpec("s1_s2_s3_matfiles_10gest", "*.dat", "session1_participant*", GESTURES_10),
-    "5gest": TaskSpec("s1_s2_s3_matfiles_5gest", "*.mat", None, GESTURES_5),
-    "17participants": TaskSpec("17participants", "*.mat", None, GESTURES_10, 17),
-    "10part": TaskSpec("s1_s2_s3_matfiles_10part", "session3_participant*", None, None, 10),
-    "5part": TaskSpec("s1_s2_s3_matfiles_5part", "session3_participant*", None, None, 5),
+    "10gest": TaskSpec("s1_s2_s3_matfiles_10gest", "*.mat", GESTURES_10),
+    "5gest": TaskSpec("s1_s2_s3_matfiles_5gest", "*.mat", GESTURES_5),
+    "17participants": TaskSpec("17participants", "*.mat", GESTURES_10, 17),
+    "10part": TaskSpec("s1_s2_s3_matfiles_10part", "session3_participant*.mat", None, 10),
+    "5part": TaskSpec("s1_s2_s3_matfiles_5part", "session3_participant*.mat", None, 5),
 }
 
 
@@ -83,13 +70,9 @@ def _natural_key(p: Path) -> list:
 
 
 def select_files(source: Path, task: str) -> list[Path]:
-    """Return the files the notebook cell for ``task`` would copy (sorted, deterministic)."""
+    """Return the files selected for ``task`` (naturally sorted, deterministic)."""
     spec = TASKS[task]
-    if spec.participant_dirs:
-        dirs = sorted((d for d in source.glob(spec.participant_dirs) if d.is_dir()), key=_natural_key)
-        candidates = [f for d in dirs for f in sorted(d.glob(spec.pattern))]
-    else:
-        candidates = sorted(source.glob(spec.pattern))
+    candidates = sorted(source.glob(spec.pattern), key=_natural_key)
     out = []
     for f in candidates:
         if not f.is_file():

@@ -6,6 +6,11 @@ model:
   pretrained: true   # false builds a randomly initialised ViTConfig from the keys below (tests/smoke runs)
   name: google/vit-base-patch16-224-in21k
   image_size: 224
+  input_repr: flatten  # flatten (truncating, legacy) | spectrogram (STFT of the full window)
+  spectrogram:         # used only when input_repr: spectrogram
+    nperseg: 32
+    noverlap: null     # null = nperseg // 2
+    log: true          # log1p of the STFT magnitude
 train:
   epochs: 50
   batch_size: 32

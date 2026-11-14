@@ -19,6 +19,7 @@ import yaml
 
 from .augment import augment_data
 from .data import (
+    INPUT_REPRS,
     EMGDataset,
     channel_stats,
     extract_group_from_filename,
@@ -331,17 +332,23 @@ def run_vit(cfg: dict, mode: str, out_dir="runs", tracker: Tracker | None = None
     size = int(model_cfg.get("image_size", 224))
     image_shape = (3, size, size)
     tl = int(cfg["target_length"])
-    vit_input = image_input_report(train_f[0], tl, image_shape)
+    input_repr = model_cfg.get("input_repr", "flatten")
+    if input_repr not in INPUT_REPRS:
+        raise ValueError(f"model.input_repr must be one of {INPUT_REPRS}, got {input_repr!r}")
+    spec = model_cfg.get("spectrogram")
+    vit_input = image_input_report(train_f[0], tl, image_shape, input_repr, spec)
     if vit_input["truncated"]:
         log.warning("ViT input truncation: the %s (time, channels) window has %d values but the image holds %d; "
                     "only the first %.1f%% (%d of %d time samples) reach the ViT, while the SVM sees the full "
                     "window.", vit_input["window_shape_time_channels"], vit_input["window_values"],
                     vit_input["image_values"], 100 * vit_input["retained_fraction"],
                     vit_input["retained_time_samples"], tl)
-    stats = channel_stats(train_f, tl, image_shape)  # per-channel, train files only
+    # per-channel (per-plane for spectrogram), train files only
+    stats = channel_stats(train_f, tl, image_shape, input_repr=input_repr, spectrogram=spec)
 
     def make_ds(f, y):
-        return EMGDataset(f, y, tl, norm_stats=stats, image_shape=image_shape)
+        return EMGDataset(f, y, tl, norm_stats=stats, image_shape=image_shape,
+                          input_repr=input_repr, spectrogram=spec)
 
     train_ds = make_ds(train_f, train_y)
     acfg = cfg.get("augment") or {}
