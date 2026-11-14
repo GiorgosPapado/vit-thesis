@@ -14,7 +14,7 @@ configs/           YAML configs: base.yaml < svm.yaml / vit_google.yaml / vit_sc
 scripts/           convert_dat_to_mat.py: GRABMyo WFDB (.dat/.hea) -> flat .mat folder; prepare_folders.py: builds the per-task dataset folders from it
 tests/             pytest suite (torch-dependent tests skip when torch is not installed; CI requires them)
 03_experiments/    remaining EMG notebooks (PCA search, MLflow plotting, max-samples reproduction); the other experiment notebooks were removed, see tag `pre-cleanup`
-requirements.txt   thesis-era pinned direct dependencies (EMG + torch only; unverified)
+thesis-era-pins.txt   thesis-era pinned direct dependencies (EMG + torch only; unverified)
 ```
 
 Task names mean the experimental split: `5gest` / `10gest` (5 or 10 gesture classes), `5part` / `10part` / `17participants` (number of participants).
@@ -30,12 +30,12 @@ Extras: `torch` (torch, transformers; **required** for the `vit-google` / `vit-s
 
 **Supported Python and the two install paths**
 
-- Path A, reproducible thesis-era set: `pip install -r requirements.txt` (then `pip install -e .`). Targets **Python 3.10 or 3.11**; there are no Python 3.12 wheels for torch 2.0.1 / numpy 1.25.1. The original freeze (with CUDA 11.8 builds, `+cu118`) was in the deleted `requirements-freeze.txt`, which is available in tag `pre-cleanup`; for GPU install matching wheels from https://download.pytorch.org/whl/cu118 first. `wfdb` (for the converter) is listed unpinned in `requirements.txt`.
+- Path A, reproducible thesis-era set: `pip install -r thesis-era-pins.txt` (then `pip install -e .`). Targets **Python 3.10 or 3.11**; there are no Python 3.12 wheels for torch 2.0.1 / numpy 1.25.1. The original freeze (with CUDA 11.8 builds, `+cu118`) was in the deleted `requirements-freeze.txt`, which is available in tag `pre-cleanup`; for GPU install matching wheels from https://download.pytorch.org/whl/cu118 first. `wfdb` (for the converter) is listed unpinned in `thesis-era-pins.txt`.
 - Path B, newer stack: `pip install -e ".[dev,torch,tracking]"` uses only lower bounds from `pyproject.toml` (`requires-python >=3.10`) and also works on newer Pythons and libraries (tests ran on Python 3.12 with torch 2.15, transformers 5.22).
 
-`pyproject.toml` extras hold lower bounds; `requirements.txt` holds the pinned reproducible set.
+`pyproject.toml` extras hold lower bounds; `thesis-era-pins.txt` holds the pinned reproducible set.
 
-**Verification caveat:** the tests were run against newer versions than the pins (torch 2.15.0 CPU, transformers 5.22.2, numpy 2.5.4, scikit-learn 1.9.1, matplotlib 3.11.2, PyYAML 6.0.3). The pinned set in `requirements.txt` (torch 2.0.1, transformers 4.30.2, numpy 1.25.1, ...) has NOT been verified here. The `torch` extra deliberately has no upper cap.
+**Verification caveat:** the tests were run against newer versions than the pins (torch 2.15.0 CPU, transformers 5.22.2, numpy 2.5.4, scikit-learn 1.9.1, matplotlib 3.11.2, PyYAML 6.0.3). The pinned set in `thesis-era-pins.txt` (torch 2.0.1, transformers 4.30.2, numpy 1.25.1, ...) has NOT been verified here. The `torch` extra deliberately has no upper cap.
 
 ## Configs and tasks
 

@@ -1,3 +1,6 @@
+# Archival record of the thesis-era environment. Deliberately NOT named requirements*.txt so GitHub's dependency
+# graph / Dependabot does not scan these intentionally old pins (they are not used by CI or `pip install -e .`).
+# Install with: pip install -r thesis-era-pins.txt
 # Thesis-era pins; target Python 3.10/3.11 (no 3.12 wheels for torch 2.0.1 / numpy 1.25.1). UNVERIFIED:
 # none of this pinned set has been tested. Tests ran against torch 2.15.0, transformers 5.22.2, numpy 2.5.4,
 # scikit-learn 1.9.1, matplotlib 3.11.2, PyYAML 6.0.3, scipy 1.18.1 (all newer than the pins; mlflow not installed).

@@ -47,7 +47,7 @@ Participant-label tasks are forced to a random split; report them separately and
 - Optional: a grouped (participant-disjoint) run on `10gest`/`5gest`, to measure generalisation to new users.
 
 ### B4. Pinned environment
-1. Create a Python 3.10 environment; `pip install -r requirements.txt && pip install -e .`.
+1. Create a Python 3.10 environment; `pip install -r thesis-era-pins.txt && pip install -e .`.
 2. Run `REQUIRE_TORCH=1 pytest -q -rs`; fix or drop pins that fail.
 3. If the thesis-era set cannot be made to work, remove it and keep a lock file generated from versions that pass CI.
 
